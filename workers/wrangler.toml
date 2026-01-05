@@ -1,4 +1,4 @@
-name = "dob-api"
+name = "dob-edge"
 main = "src/index.ts"
 compatibility_date = "2026-01-01"
 
@@ -11,4 +11,4 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["SwarmHubDO", "LiveTrackerDO", "HealthMetricsDO"]
+new_sqlite_classes = ["SwarmHubDO", "LiveTrackerDO", "HealthMetricsDO"]
