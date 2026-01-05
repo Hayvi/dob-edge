@@ -57,7 +57,9 @@ export default {
       url.pathname === '/api/prematch-stream' ||
       url.pathname === '/api/live-game-stream'
     ) {
-      return json({ error: 'Not implemented in workers yet' }, { status: 501 });
+      const swarmId = env.SWARM_HUB.idFromName('global');
+      const swarmStub = env.SWARM_HUB.get(swarmId);
+      return swarmStub.fetch(request);
     }
 
     if (url.pathname.startsWith('/api/results/')) {

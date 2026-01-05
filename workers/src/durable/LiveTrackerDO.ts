@@ -181,9 +181,14 @@ export class LiveTrackerDO {
     if (this.upstreamConnecting) return this.upstreamConnecting;
 
     this.upstreamConnecting = (async () => {
-      const partnerId = 1777;
-      const siteRef = encodeURIComponent('https://sportsbook.forzza1x2.com/');
-      const url = `wss://animation.ml.bcua.io/animation_json_v2?partner_id=${partnerId}&site_ref=${siteRef}`;
+      const partnerIdRaw = this.env.LIVE_TRACKER_PARTNER_ID;
+      const partnerId = Number.isFinite(Number(partnerIdRaw)) && Number(partnerIdRaw) > 0 ? Number(partnerIdRaw) : 1777;
+
+      const siteRefRaw = this.env.LIVE_TRACKER_SITE_REF ? String(this.env.LIVE_TRACKER_SITE_REF) : 'https://sportsbook.forzza1x2.com/';
+      const siteRef = encodeURIComponent(siteRefRaw);
+
+      const baseUrl = this.env.LIVE_TRACKER_WS_URL ? String(this.env.LIVE_TRACKER_WS_URL) : 'wss://animation.ml.bcua.io/animation_json_v2';
+      const url = `${baseUrl}?partner_id=${partnerId}&site_ref=${siteRef}`;
 
       const ws = new WebSocket(url);
       this.upstream = ws;

@@ -6,9 +6,7 @@ function renderSportsList() {
   }
 
   let allowed = null;
-  if (cachedMode) {
-    allowed = (sportsWithCachedGames instanceof Set ? sportsWithCachedGames : null);
-  } else if (currentMode === 'live') {
+  if (currentMode === 'live') {
     allowed = (sportsWithLiveGames instanceof Set ? sportsWithLiveGames : null);
   } else if (currentMode === 'results') {
     allowed = (sportsWithResults instanceof Set ? sportsWithResults : null);
@@ -32,9 +30,7 @@ function renderSportsList() {
   document.getElementById('totalSports').textContent = sports.length;
 
   let counts;
-  if (cachedMode) {
-    counts = sportsCountsCached;
-  } else if (currentMode === 'live') {
+  if (currentMode === 'live') {
     counts = sportsCountsLive;
   } else if (currentMode === 'results') {
     counts = sportsCountsResults;

@@ -1,4 +1,8 @@
 import type { Env } from '../env.js';
+import { getCountsFp, getGameFp, getOddsFp, getSportFp } from '../lib/fingerprints.js';
+import { buildOddsArrFromMarket, getSportMainMarketTypePriority, pickPreferredMarketFromEmbedded } from '../lib/odds.js';
+import { parseGamesFromData } from '../lib/parseGamesFromData.js';
+import { extractSportsCountsFromSwarm } from '../lib/swarmCounts.js';
 
 type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
 
@@ -12,6 +16,57 @@ type HierarchyCache = {
   cachedAtMs: number;
   data: unknown;
 };
+
+type Client = {
+  id: string;
+  writer: WritableStreamDefaultWriter<Uint8Array>;
+  abortSignal: AbortSignal;
+};
+
+type SubscriptionEntry = {
+  state: Record<string, unknown>;
+  onEmit: (data: unknown) => void;
+};
+
+type SportStreamGroup = {
+  sportId: string;
+  mode: 'live' | 'prematch';
+  sportName: string;
+  clients: Map<string, Client>;
+  timer: number | null;
+  lastFp: string;
+  lastOddsFp: string;
+};
+
+type GameStreamGroup = {
+  gameId: string;
+  clients: Map<string, Client>;
+  timer: number | null;
+  lastFp: string;
+};
+
+const encoder = new TextEncoder();
+
+function sseHeaders(): Headers {
+  const headers = new Headers();
+  headers.set('Content-Type', 'text/event-stream');
+  headers.set('Cache-Control', 'no-cache, no-transform');
+  headers.set('Connection', 'keep-alive');
+  headers.set('X-Accel-Buffering', 'no');
+  return headers;
+}
+
+function encodeSseEvent(event: string | null, data: unknown): Uint8Array {
+  const json = JSON.stringify(data);
+  if (event) {
+    return encoder.encode(`event: ${event}\ndata: ${json}\n\n`);
+  }
+  return encoder.encode(`data: ${json}\n\n`);
+}
+
+function encodeSseComment(text: string): Uint8Array {
+  return encoder.encode(`: ${text}\n\n`);
+}
 
 function json(data: JsonValue, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
@@ -56,9 +111,65 @@ export class SwarmHubDO {
   private wsMessageParseErrorsTotal = 0;
   private wsMessageTimestampsMs: number[] = [];
 
+  private subscriptions: Map<string, SubscriptionEntry> = new Map();
+
+  private countsClients: Map<string, Client> = new Map();
+  private countsHeartbeatTimer: number | null = null;
+  private countsLiveSubid: string | null = null;
+  private countsPrematchSubid: string | null = null;
+  private countsLastLiveFp = '';
+  private countsLastPrematchFp = '';
+  private countsLivePayload: unknown = null;
+  private countsPrematchPayload: unknown = null;
+
+  private liveGroups: Map<string, SportStreamGroup> = new Map();
+  private prematchGroups: Map<string, SportStreamGroup> = new Map();
+  private liveGameGroups: Map<string, GameStreamGroup> = new Map();
+
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.env = env;
+
+    if (this.env.SWARM_WS_URL) {
+      this.wsUrl = String(this.env.SWARM_WS_URL);
+    }
+    if (this.env.SWARM_PARTNER_ID) {
+      const pid = Number(this.env.SWARM_PARTNER_ID);
+      if (Number.isFinite(pid) && pid > 0) {
+        this.partnerId = pid;
+      }
+    }
+  }
+
+  private deepMerge(target: Record<string, unknown>, patch: unknown): void {
+    if (!patch || typeof patch !== 'object') return;
+    const p = patch as Record<string, unknown>;
+    for (const [k, v] of Object.entries(p)) {
+      if (v === null) {
+        delete target[k];
+        continue;
+      }
+      if (Array.isArray(v)) {
+        target[k] = v;
+        continue;
+      }
+      if (v && typeof v === 'object') {
+        const cur = target[k];
+        if (!cur || typeof cur !== 'object' || Array.isArray(cur)) {
+          target[k] = {};
+        }
+        this.deepMerge(target[k] as Record<string, unknown>, v);
+        continue;
+      }
+      target[k] = v;
+    }
+  }
+
+  private handleSubscriptionDelta(subid: string, delta: unknown): void {
+    const entry = this.subscriptions.get(subid);
+    if (!entry) return;
+    this.deepMerge(entry.state, { data: delta });
+    entry.onEmit((entry.state as any).data);
   }
 
   private recordWsMessage(kind: 'ok' | 'parse_error'): void {
@@ -114,6 +225,14 @@ export class SwarmHubDO {
 
         const obj = message as Record<string, unknown>;
         const rid = obj.rid;
+
+        if (rid === 0 && obj.data && typeof obj.data === 'object') {
+          for (const [subid, delta] of Object.entries(obj.data as Record<string, unknown>)) {
+            this.handleSubscriptionDelta(String(subid), delta);
+          }
+          return;
+        }
+
         if (typeof rid === 'string' && this.pending.has(rid)) {
           const entry = this.pending.get(rid);
           if (!entry) return;
@@ -201,6 +320,460 @@ export class SwarmHubDO {
         reject(e);
       }
     });
+  }
+
+  private async subscribeGet(params: Record<string, unknown>, onEmit: (data: unknown) => void): Promise<string> {
+    const response = (await this.sendRequest('get', { ...params, subscribe: true })) as Record<string, unknown>;
+    if (response?.code !== undefined && response.code !== 0) {
+      const msg = response?.msg ? `: ${String(response.msg)}` : '';
+      throw new Error(`get subscribe failed${msg}`);
+    }
+
+    const initial = response.data as Record<string, unknown> | undefined;
+    const subid = initial?.subid;
+    if (!subid) throw new Error('subscribe did not return subid');
+
+    const state = (initial as Record<string, unknown>) || {};
+    this.subscriptions.set(String(subid), { state, onEmit });
+    onEmit((state as any).data);
+    return String(subid);
+  }
+
+  private async unsubscribe(subid: string): Promise<void> {
+    this.subscriptions.delete(String(subid));
+    try {
+      await this.sendRequest('unsubscribe', { subid: String(subid) }, 15000);
+    } catch {
+      return;
+    }
+  }
+
+  private async broadcast(clients: Map<string, Client>, bytes: Uint8Array): Promise<void> {
+    const dead: string[] = [];
+    for (const [id, client] of clients.entries()) {
+      if (client.abortSignal.aborted) {
+        dead.push(id);
+        continue;
+      }
+      try {
+        await client.writer.write(bytes);
+      } catch {
+        dead.push(id);
+      }
+    }
+
+    for (const id of dead) {
+      const client = clients.get(id);
+      if (client) {
+        try {
+          client.writer.close();
+        } catch {
+          // ignore
+        }
+      }
+      clients.delete(id);
+    }
+  }
+
+  private async broadcastAllLiveGroups(bytes: Uint8Array): Promise<void> {
+    for (const group of this.liveGroups.values()) {
+      await this.broadcast(group.clients, bytes);
+    }
+  }
+
+  private startCountsHeartbeat(): void {
+    if (this.countsHeartbeatTimer != null) return;
+    this.countsHeartbeatTimer = setInterval(() => {
+      void this.broadcast(this.countsClients, encodeSseComment(`ping ${Date.now()}`));
+      if (this.countsClients.size === 0) this.stopCountsHeartbeat();
+    }, 15000) as unknown as number;
+  }
+
+  private stopCountsHeartbeat(): void {
+    if (this.countsHeartbeatTimer == null) return;
+    clearInterval(this.countsHeartbeatTimer);
+    this.countsHeartbeatTimer = null;
+  }
+
+  private handleCountsEmit(kind: 'live' | 'prematch', data: unknown): void {
+    const counts = extractSportsCountsFromSwarm(data);
+    const payload = { sports: counts.sports, total_games: counts.totalGames };
+
+    if (kind === 'live') {
+      const fp = getCountsFp(counts.sports);
+      if (fp && fp === this.countsLastLiveFp) return;
+      this.countsLastLiveFp = fp;
+      this.countsLivePayload = payload;
+      void this.broadcast(this.countsClients, encodeSseEvent('live_counts', payload));
+      void this.broadcastAllLiveGroups(encodeSseEvent('counts', payload));
+      return;
+    }
+
+    const fp = getCountsFp(counts.sports);
+    if (fp && fp === this.countsLastPrematchFp) return;
+    this.countsLastPrematchFp = fp;
+    this.countsPrematchPayload = payload;
+    void this.broadcast(this.countsClients, encodeSseEvent('prematch_counts', payload));
+    void this.broadcastAllLiveGroups(encodeSseEvent('prematch_counts', payload));
+  }
+
+  private async ensureCountsSubscriptions(): Promise<void> {
+    if (this.countsLiveSubid && this.countsPrematchSubid) return;
+
+    if (!this.countsLiveSubid) {
+      this.countsLiveSubid = await this.subscribeGet(
+        {
+          source: 'betting',
+          what: { sport: ['id', 'name'], game: ['id'] },
+          where: { game: { type: 1 } }
+        },
+        (data) => this.handleCountsEmit('live', data)
+      );
+    }
+
+    if (!this.countsPrematchSubid) {
+      this.countsPrematchSubid = await this.subscribeGet(
+        {
+          source: 'betting',
+          what: { sport: ['id', 'name'], game: ['id'] },
+          where: { game: { type: 0 } }
+        },
+        (data) => this.handleCountsEmit('prematch', data)
+      );
+    }
+  }
+
+  private async stopCountsSubscriptions(): Promise<void> {
+    const live = this.countsLiveSubid;
+    const pre = this.countsPrematchSubid;
+    this.countsLiveSubid = null;
+    this.countsPrematchSubid = null;
+    this.countsLastLiveFp = '';
+    this.countsLastPrematchFp = '';
+    this.countsLivePayload = null;
+    this.countsPrematchPayload = null;
+
+    if (live) await this.unsubscribe(live);
+    if (pre) await this.unsubscribe(pre);
+  }
+
+  private async handleCountsStream(request: Request): Promise<Response> {
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = writable.getWriter();
+    const id = crypto.randomUUID();
+    const client: Client = { id, writer, abortSignal: request.signal };
+    this.countsClients.set(id, client);
+
+    request.signal.addEventListener('abort', () => {
+      const existing = this.countsClients.get(id);
+      if (existing) {
+        try {
+          existing.writer.close();
+        } catch {
+          // ignore
+        }
+        this.countsClients.delete(id);
+      }
+      if (this.countsClients.size === 0) {
+        this.stopCountsHeartbeat();
+        if (this.liveGroups.size === 0) {
+          void this.stopCountsSubscriptions();
+        }
+      }
+    });
+
+    if (this.countsClients.size === 1) {
+      this.startCountsHeartbeat();
+      void this.ensureCountsSubscriptions().catch((e) => {
+        void this.broadcast(this.countsClients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
+      });
+    }
+
+    if (this.countsLivePayload) {
+      try {
+        await writer.write(encodeSseEvent('live_counts', this.countsLivePayload));
+      } catch {
+        // ignore
+      }
+    }
+    if (this.countsPrematchPayload) {
+      try {
+        await writer.write(encodeSseEvent('prematch_counts', this.countsPrematchPayload));
+      } catch {
+        // ignore
+      }
+    }
+
+    return new Response(readable, { status: 200, headers: sseHeaders() });
+  }
+
+  private async getSportName(sportId: string, fallback: string | null): Promise<string> {
+    if (fallback) return fallback;
+    try {
+      const hierarchy = (await this.getHierarchy(false)) as any;
+      const h = hierarchy?.data || hierarchy;
+      const sports = h?.sport || {};
+      const s = sports[String(sportId)];
+      if (s?.name) return String(s.name);
+    } catch {
+      // ignore
+    }
+    return String(sportId);
+  }
+
+  private filterPrematchGames(games: any[]): any[] {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const cutoffSec = nowSec + 5 * 60;
+    return (Array.isArray(games) ? games : []).filter((g) => {
+      const ts = Number(g?.start_ts);
+      if (!Number.isFinite(ts) || ts <= 0) return true;
+      return ts > cutoffSec;
+    });
+  }
+
+  private startSportGroup(group: SportStreamGroup): void {
+    if (group.timer != null) return;
+    group.timer = setInterval(() => {
+      void this.pollSportGroup(group);
+    }, 5000) as unknown as number;
+  }
+
+  private stopSportGroup(group: SportStreamGroup): void {
+    if (group.timer == null) return;
+    clearInterval(group.timer);
+    group.timer = null;
+  }
+
+  private async pollSportGroup(group: SportStreamGroup): Promise<void> {
+    if (group.clients.size === 0) {
+      this.stopSportGroup(group);
+      return;
+    }
+
+    try {
+      const response = await this.sendRequest('get', {
+        source: 'betting',
+        what: {
+          sport: ['id', 'name'],
+          region: ['id', 'name'],
+          competition: ['id', 'name'],
+          game: ['id', 'type', 'start_ts', 'team1_name', 'team2_name', 'info', 'text_info', 'markets_count'],
+          market: ['id', 'type', 'order', 'is_blocked', 'display_key'],
+          event: ['id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
+        },
+        where: { sport: { id: Number(group.sportId) }, game: { type: group.mode === 'live' ? 1 : 0 } }
+      });
+
+      const data = unwrapSwarmData(response);
+      let games = parseGamesFromData(data as any, group.sportName);
+      if (group.mode === 'prematch') {
+        games = this.filterPrematchGames(games);
+      }
+
+      const typePriority = getSportMainMarketTypePriority(group.sportName);
+      const oddsUpdates: Array<{ gameId: unknown; odds: unknown; markets_count: number }> = [];
+      const oddsFpParts: string[] = [];
+
+      for (const g of games) {
+        const gid = (g as any)?.id ?? (g as any)?.gameId;
+        const marketMap = (g as any)?.market;
+        const market = pickPreferredMarketFromEmbedded(marketMap, typePriority);
+        const oddsArr = buildOddsArrFromMarket(market);
+        const marketsCount = typeof (g as any)?.markets_count === 'number'
+          ? Number((g as any).markets_count)
+          : (marketMap && typeof marketMap === 'object' ? Object.keys(marketMap).length : 0);
+
+        const fp = getOddsFp(market);
+        oddsFpParts.push(`${String(gid ?? '')}:${fp}`);
+
+        oddsUpdates.push({ gameId: gid, odds: oddsArr, markets_count: marketsCount });
+      }
+
+      const oddsFp = oddsFpParts.sort().join('~');
+      if (oddsFp && oddsFp !== group.lastOddsFp) {
+        group.lastOddsFp = oddsFp;
+        await this.broadcast(
+          group.clients,
+          encodeSseEvent('odds', { sportId: group.sportId, updates: oddsUpdates })
+        );
+      }
+
+      const fp = getSportFp(games);
+      if (fp && fp === group.lastFp) return;
+      group.lastFp = fp;
+
+      const payload = {
+        sportId: group.sportId,
+        sportName: group.sportName,
+        data: games,
+        last_updated: new Date().toISOString()
+      };
+      await this.broadcast(group.clients, encodeSseEvent('games', payload));
+    } catch (e) {
+      await this.broadcast(group.clients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
+    }
+  }
+
+  private async handleSportStream(request: Request, mode: 'live' | 'prematch'): Promise<Response> {
+    const url = new URL(request.url);
+    const sportId = url.searchParams.get('sportId');
+    if (!sportId) {
+      return json({ error: 'sportId is required' }, { status: 400 });
+    }
+
+    const sportNameParam = url.searchParams.get('sportName');
+    const sportName = await this.getSportName(sportId, sportNameParam);
+
+    const key = String(sportId);
+    const groups = mode === 'live' ? this.liveGroups : this.prematchGroups;
+    let group = groups.get(key);
+    if (!group) {
+      group = { sportId: key, sportName, mode, clients: new Map(), timer: null, lastFp: '', lastOddsFp: '' };
+      groups.set(key, group);
+    } else if (!group.sportName && sportName) {
+      group.sportName = sportName;
+    }
+
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = writable.getWriter();
+    const id = crypto.randomUUID();
+    const client: Client = { id, writer, abortSignal: request.signal };
+    group.clients.set(id, client);
+
+    request.signal.addEventListener('abort', () => {
+      const existing = group?.clients.get(id);
+      if (existing) {
+        try {
+          existing.writer.close();
+        } catch {
+          // ignore
+        }
+        group?.clients.delete(id);
+      }
+      if (group && group.clients.size === 0) {
+        this.stopSportGroup(group);
+        groups.delete(key);
+
+        if (mode === 'live' && this.liveGroups.size === 0 && this.countsClients.size === 0) {
+          void this.stopCountsSubscriptions();
+        }
+      }
+    });
+
+    try {
+      await writer.write(encodeSseComment(`ready ${Date.now()}`));
+    } catch {
+      // ignore
+    }
+
+    if (mode === 'live') {
+      if (!this.countsLiveSubid || !this.countsPrematchSubid) {
+        void this.ensureCountsSubscriptions().catch(() => null);
+      }
+
+      if (this.countsLivePayload) {
+        try {
+          await writer.write(encodeSseEvent('counts', this.countsLivePayload));
+        } catch {
+          // ignore
+        }
+      }
+      if (this.countsPrematchPayload) {
+        try {
+          await writer.write(encodeSseEvent('prematch_counts', this.countsPrematchPayload));
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    this.startSportGroup(group);
+    void this.pollSportGroup(group);
+
+    return new Response(readable, { status: 200, headers: sseHeaders() });
+  }
+
+  private startGameGroup(group: GameStreamGroup): void {
+    if (group.timer != null) return;
+    group.timer = setInterval(() => {
+      void this.pollGameGroup(group);
+    }, 5000) as unknown as number;
+  }
+
+  private stopGameGroup(group: GameStreamGroup): void {
+    if (group.timer == null) return;
+    clearInterval(group.timer);
+    group.timer = null;
+  }
+
+  private async pollGameGroup(group: GameStreamGroup): Promise<void> {
+    if (group.clients.size === 0) {
+      this.stopGameGroup(group);
+      return;
+    }
+
+    try {
+      const response = await this.sendRequest('get', {
+        source: 'betting',
+        what: {
+          game: ['id', 'type', 'start_ts', 'team1_name', 'team2_name', 'info', 'text_info', 'markets_count'],
+          market: ['id', 'type', 'order', 'is_blocked', 'display_key'],
+          event: ['id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
+        },
+        where: { game: { id: String(group.gameId) } }
+      });
+
+      const data = unwrapSwarmData(response) as any;
+      const game = (data?.game && typeof data.game === 'object') ? (data.game[String(group.gameId)] || null) : null;
+      const fp = getGameFp(game);
+      if (fp && fp === group.lastFp) return;
+      group.lastFp = fp;
+
+      const payload = { gameId: group.gameId, data: game, last_updated: new Date().toISOString() };
+      await this.broadcast(group.clients, encodeSseEvent('game', payload));
+    } catch (e) {
+      await this.broadcast(group.clients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
+    }
+  }
+
+  private async handleLiveGameStream(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const gameId = url.searchParams.get('gameId');
+    if (!gameId) return json({ error: 'gameId is required' }, { status: 400 });
+
+    const key = String(gameId);
+    let group = this.liveGameGroups.get(key);
+    if (!group) {
+      group = { gameId: key, clients: new Map(), timer: null, lastFp: '' };
+      this.liveGameGroups.set(key, group);
+    }
+
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = writable.getWriter();
+    const id = crypto.randomUUID();
+    const client: Client = { id, writer, abortSignal: request.signal };
+    group.clients.set(id, client);
+
+    request.signal.addEventListener('abort', () => {
+      const existing = group?.clients.get(id);
+      if (existing) {
+        try {
+          existing.writer.close();
+        } catch {
+          // ignore
+        }
+        group?.clients.delete(id);
+      }
+      if (group && group.clients.size === 0) {
+        this.stopGameGroup(group);
+        this.liveGameGroups.delete(key);
+      }
+    });
+
+    this.startGameGroup(group);
+    void this.pollGameGroup(group);
+
+    return new Response(readable, { status: 200, headers: sseHeaders() });
   }
 
   private async getHierarchy(forceRefresh: boolean): Promise<unknown> {
@@ -310,6 +883,22 @@ export class SwarmHubDO {
       } catch (e) {
         return json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
       }
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/counts-stream') {
+      return this.handleCountsStream(request);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/live-stream') {
+      return this.handleSportStream(request, 'live');
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/prematch-stream') {
+      return this.handleSportStream(request, 'prematch');
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/live-game-stream') {
+      return this.handleLiveGameStream(request);
     }
 
     if (request.method === 'GET' && url.pathname === '/api/results/competitions') {

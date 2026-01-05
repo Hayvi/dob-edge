@@ -4,20 +4,16 @@ let currentSport = null;
 let currentCompetition = null;
 let currentGames = [];
 let selectedGame = null;
-let cachedMode = false; // Use this for backward compatibility or simple check
-let currentMode = 'prematch'; // 'prematch', 'live', 'cached', 'results'
+let currentMode = 'prematch'; // 'prematch', 'live', 'results'
 
-let sportsWithCachedGames = null;
 let sportsWithPrematchGames = null;
 let sportsWithLiveGames = null;
 let sportsWithResults = null;
 
-let sportsCountsCached = null;
 let sportsCountsPrematch = null;
 let sportsCountsLive = null;
 let sportsCountsResults = null;
 
-let totalGamesCached = null;
 let totalGamesPrematch = null;
 let totalGamesLive = null;
 let totalGamesResults = null;
@@ -41,12 +37,11 @@ const regionFlags = {
 // UI Elements & Mode Logic
 const btnModePrematch = document.getElementById('modePrematch');
 const btnModeLive = document.getElementById('modeLive');
-const btnModeCached = document.getElementById('modeCached');
 const btnModeResults = document.getElementById('modeResults');
 
 function setMode(mode) {
+  if (mode === 'cached') mode = 'prematch';
   currentMode = mode;
-  cachedMode = (mode === 'cached');
 
   // Stop streams that don't apply to new mode
   if (mode !== 'live' && typeof stopLiveStream === 'function') {
@@ -57,7 +52,7 @@ function setMode(mode) {
   }
 
   // Update UI
-  [btnModePrematch, btnModeLive, btnModeCached, btnModeResults].forEach(btn => btn?.classList.remove('active'));
+  [btnModePrematch, btnModeLive, btnModeResults].forEach(btn => btn?.classList.remove('active'));
 
   const activeBtn = document.getElementById(`mode${mode.charAt(0).toUpperCase() + mode.slice(1)}`);
   if (activeBtn) activeBtn.classList.add('active');
@@ -77,9 +72,9 @@ function setMode(mode) {
       if (typeof startLiveStream === 'function') {
         startLiveStream(currentSport?.id || null);
       }
-      loadLiveGames(currentSport.id, currentSport.name);
-    } else if (mode === 'cached') {
-      loadGames(currentSport.id, currentSport.name);
+      welcomeScreen.classList.add('hidden');
+      gamesContainer.classList.remove('hidden');
+      document.getElementById('selectedSportName').textContent = currentSport.name;
     } else if (mode === 'results') {
       loadResultGames(currentSport.id, currentSport.name);
     } else if (mode === 'prematch') {
@@ -97,5 +92,4 @@ function setMode(mode) {
 
 if (btnModePrematch) btnModePrematch.addEventListener('click', () => setMode('prematch'));
 if (btnModeLive) btnModeLive.addEventListener('click', () => setMode('live'));
-if (btnModeCached) btnModeCached.addEventListener('click', () => setMode('cached'));
 if (btnModeResults) btnModeResults.addEventListener('click', () => setMode('results'));
