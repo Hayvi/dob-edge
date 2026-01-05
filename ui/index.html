@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Forzza Scraper - Sports Browser</title>
+  <link rel="stylesheet" href="css/01-base.css">
+  <link rel="stylesheet" href="css/02-header-buttons.css">
+  <link rel="stylesheet" href="css/03-sidebar.css">
+  <link rel="stylesheet" href="css/04-content-games.css">
+  <link rel="stylesheet" href="css/05-details-markets.css">
+  <link rel="stylesheet" href="css/06-modal-loading-toast.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <button id="mobileSidebarToggle" class="btn btn-secondary mobile-only" aria-label="Open sports menu">
+          ☰
+        </button>
+        <span class="logo-icon">⚽</span>
+        <span class="logo-text">Forzza Scraper</span>
+      </div>
+      <div class="header-actions">
+        <button id="refreshHierarchy" class="btn btn-primary">
+          <span class="btn-icon">🔄</span> <span class="btn-text">Refresh Data</span>
+        </button>
+        <button id="bulkScrape" class="btn btn-secondary">
+          <span class="btn-icon">📥</span> <span class="btn-text">Bulk Scrape</span>
+        </button>
+        <button id="showHealth" class="btn btn-info">
+          <span class="btn-icon">💚</span> <span class="btn-text">Health</span>
+        </button>
+      </div>
+    </header>
+
+    <div id="mobileOverlay" class="mobile-overlay hidden"></div>
+
+    <div class="main-container">
+      <!-- Sidebar - Sports List -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div class="tabs">
+            <button id="modePrematch" class="btn-mode active" data-mode="prematch">Prematch</button>
+            <button id="modeLive" class="btn-mode" data-mode="live">Live</button>
+            <button id="modeCached" class="btn-mode" data-mode="cached">Cached</button>
+            <button id="modeResults" class="btn-mode" data-mode="results">Results</button>
+          </div>
+        </div>
+        <div class="search-box">
+          <input type="text" id="sportSearch" placeholder="Search sports...">
+        </div>
+        <div id="sportsList" class="sports-list">
+          <div class="loading">Loading sports...</div>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <main class="content">
+        <div id="welcomeScreen" class="welcome-screen">
+          <div class="welcome-icon">🏆</div>
+          <h2>Welcome to Forzza Scraper</h2>
+          <p>Select a sport from the sidebar to view games</p>
+          <div class="stats-cards" id="statsCards">
+            <div class="stat-card">
+              <div class="stat-value" id="totalSports">-</div>
+              <div class="stat-label">Sports</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="cacheHits">-</div>
+              <div class="stat-label">Cache Hits</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" id="avgResponse">-</div>
+              <div class="stat-label">Avg Response</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="gamesContainer" class="games-container hidden">
+          <div class="games-header">
+            <h2 id="selectedSportName">Football</h2>
+            <div class="games-meta">
+              <span id="gamesCount" class="badge">0 games</span>
+              <span id="lastUpdated" class="meta-text"></span>
+            </div>
+          </div>
+          
+          <!-- Regions/Competitions Tree -->
+          <div id="regionsTree" class="regions-tree"></div>
+          
+          <!-- Games List -->
+          <div id="gamesList" class="games-list"></div>
+        </div>
+      </main>
+
+      <!-- Game Details Panel -->
+      <aside id="gameDetails" class="game-details hidden">
+        <div class="details-header">
+          <h3>Match Details</h3>
+          <button id="closeDetails" class="btn-close">×</button>
+        </div>
+        <div id="detailsContent" class="details-content"></div>
+      </aside>
+    </div>
+
+    <!-- Health Modal -->
+    <div id="healthModal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>🏥 API Health Status</h3>
+          <button class="btn-close" onclick="closeHealthModal()">×</button>
+        </div>
+        <div id="healthContent" class="modal-body"></div>
+      </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay hidden">
+      <div class="spinner"></div>
+      <div id="loadingText">Loading...</div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Mobile Bottom Navigation -->
+    <nav class="mobile-bottom-nav">
+      <button class="mobile-nav-btn active" id="mobileNavSports" aria-label="Sports">
+        <span class="mobile-nav-icon">🏆</span>
+        <span class="mobile-nav-label">Sports</span>
+      </button>
+      <button class="mobile-nav-btn" id="mobileNavLive" aria-label="Live">
+        <span class="mobile-nav-icon">🔴</span>
+        <span class="mobile-nav-label">Live</span>
+      </button>
+      <button class="mobile-nav-btn" id="mobileNavRefresh" aria-label="Refresh">
+        <span class="mobile-nav-icon">🔄</span>
+        <span class="mobile-nav-label">Refresh</span>
+      </button>
+    </nav>
+  </div>
+  
+  <script src="js/state.js"></script>
+  <script src="js/dom.js"></script>
+  <script src="js/mobile.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/markets.js"></script>
+  <script src="js/mainMarketHydration.js"></script>
+  <script src="js/renderGames/liveMeta.js"></script>
+  <script src="js/renderGames/virtualization.js"></script>
+  <script src="js/renderGames/treeState.js"></script>
+  <script src="js/renderGames/gameRows.js"></script>
+  <script src="js/renderGames/treeRender.js"></script>
+  <script src="js/utils/json.js"></script>
+  <script src="js/api/state.js"></script>
+  <script src="js/api/liveGameStream.js"></script>
+  <script src="js/api/livePayloads.js"></script>
+  <script src="js/api/liveFallbackPolling.js"></script>
+  <script src="js/api/liveStream.js"></script>
+  <script src="js/api/countsStream.js"></script>
+  <script src="js/api/prematchStream.js"></script>
+  <script src="js/api/healthActions.js"></script>
+  <script src="js/api/sports.js"></script>
+  <script src="js/api/games.js"></script>
+  <script src="js/api/results.js"></script>
+  <script src="js/renderSports.js"></script>
+  <script src="js/renderGames.js"></script>
+  <script src="js/details/state.js"></script>
+  <script src="js/details/liveTracker.js"></script>
+  <script src="js/details/stats.js"></script>
+  <script src="js/details/markets.js"></script>
+  <script src="js/details/uiState.js"></script>
+  <script src="js/details/bindings.js"></script>
+  <script src="js/details.js"></script>
+  <script src="js/health.js"></script>
+  <script src="js/events.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+name = "dob-api"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+
+[durable_objects]
+bindings = [
+  { name = "SWARM_HUB", class_name = "SwarmHubDO" },
+  { name = "LIVE_TRACKER", class_name = "LiveTrackerDO" },
+  { name = "HEALTH_METRICS", class_name = "HealthMetricsDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["SwarmHubDO", "LiveTrackerDO", "HealthMetricsDO"]
