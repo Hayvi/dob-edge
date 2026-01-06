@@ -1262,14 +1262,19 @@ export class SwarmHubDO {
 
   private async refreshHierarchyCache(cacheKey: string): Promise<unknown> {
     await this.ensureConnection();
-    const response = await this.sendRequest('get', {
-      source: 'betting',
-      what: {
-        sport: ['id', 'name', 'alias', 'order'],
-        region: ['id', 'name', 'alias', 'order'],
-        competition: ['id', 'name', 'order']
-      }
-    });
+    const response = await this.sendRequest(
+      'get',
+      {
+        source: 'betting',
+        what: {
+          sport: ['id', 'name', 'alias', 'order'],
+          region: ['id', 'name', 'alias', 'order'],
+          competition: ['id', 'name', 'alias', 'order']
+        },
+        where: { sport: { is_active: 1, type: { '@nin': [1, 4] } } }
+      },
+      60000
+    );
     const data = unwrapSwarmData(response);
     await this.state.storage.put(cacheKey, { cachedAtMs: Date.now(), data });
     return data;
