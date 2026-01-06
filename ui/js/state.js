@@ -84,8 +84,8 @@ function setMode(mode) {
       }
     }
   } else if (mode === 'live') {
-    if (typeof startLiveStream === 'function') {
-      startLiveStream(null);
+    if (typeof stopLiveStream === 'function') {
+      stopLiveStream();
     }
   }
 }

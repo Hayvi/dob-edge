@@ -29,6 +29,10 @@ function startLiveStream(sportId) {
   if (currentMode !== 'live') return;
 
   const key = sportId ? String(sportId) : null;
+  if (!key) {
+    stopLiveStream();
+    return;
+  }
   if (liveStreamSource && liveStreamSportId === key && liveStreamSource.readyState !== 2) {
     return;
   }
@@ -36,7 +40,7 @@ function startLiveStream(sportId) {
   stopLiveStream();
   liveStreamSportId = key;
 
-  const query = key ? `?sportId=${encodeURIComponent(key)}&_=${Date.now()}` : `?_=${Date.now()}`;
+  const query = `?sportId=${encodeURIComponent(key)}&_=${Date.now()}`;
   const es = new EventSource(apiUrl(`/api/live-stream${query}`));
   liveStreamSource = es;
 
