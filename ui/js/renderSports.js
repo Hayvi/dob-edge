@@ -15,7 +15,7 @@ function renderSportsList() {
   }
 
   const sports = Object.entries(hierarchy.sport).map(([id, sport]) => ({
-    id,
+    id: (sport && sport.id !== undefined && sport.id !== null && sport.id !== '') ? String(sport.id) : id,
     name: sport.name,
     alias: sport.alias,
     order: sport.order || 999
