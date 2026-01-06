@@ -1297,11 +1297,24 @@ export class SwarmHubDO {
           region: ['id', 'name', 'alias', 'order'],
           competition: ['id', 'name', 'alias', 'order']
         },
-        where: { sport: { is_active: 1, type: { '@nin': [1, 4] } } }
+        where: { sport: { type: { '@nin': [1, 4] } } }
       },
       60000
     );
     const data = unwrapSwarmData(response);
+
+    const h = (data as any)?.data || data;
+    const sportsNode = h?.sport;
+    const sportCount = sportsNode && typeof sportsNode === 'object'
+      ? (Array.isArray(sportsNode) ? sportsNode.length : Object.keys(sportsNode).length)
+      : 0;
+
+    if (!sportCount) {
+      const previous = await this.state.storage.get<HierarchyCache>(cacheKey);
+      if (previous && previous.data) return previous.data;
+      throw new Error('Hierarchy refresh returned 0 sports');
+    }
+
     await this.state.storage.put(cacheKey, { cachedAtMs: Date.now(), data });
     return data;
   }

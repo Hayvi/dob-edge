@@ -41,7 +41,27 @@ async function loadHierarchy(forceRefresh = false) {
     const url = forceRefresh ? '/api/hierarchy?refresh=true' : '/api/hierarchy';
     const response = await fetch(apiUrl(url), { cache: 'no-store' });
     const data = await response.json();
-    hierarchy = data.data || data;
+    const nextHierarchy = data.data || data;
+    const h = nextHierarchy && typeof nextHierarchy === 'object' ? (nextHierarchy.data || nextHierarchy) : null;
+    const sportsNode = h && typeof h === 'object' ? h.sport : null;
+    const sportsCount = sportsNode && typeof sportsNode === 'object'
+      ? (Array.isArray(sportsNode) ? sportsNode.length : Object.keys(sportsNode).length)
+      : 0;
+
+    if (!sportsCount) {
+      if (cached) {
+        hierarchy = cached.data || cached;
+        renderSportsList();
+        updateStats();
+      }
+      if (typeof showToast === 'function') {
+        showToast('Failed to load hierarchy (0 sports). Try refresh.', 'error');
+      }
+      hideLoading();
+      return;
+    }
+
+    hierarchy = nextHierarchy;
     writeHierarchyCache(hierarchy);
 
     if (typeof ensureResultsSportsLoaded === 'function') {
