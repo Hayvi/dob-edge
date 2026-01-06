@@ -246,7 +246,7 @@ export class SwarmHubDO {
         const obj = message as Record<string, unknown>;
         const rid = obj.rid;
 
-        if (rid === 0 && obj.data && typeof obj.data === 'object') {
+        if ((rid === 0 || rid === '0') && obj.data && typeof obj.data === 'object') {
           for (const [subid, delta] of Object.entries(obj.data as Record<string, unknown>)) {
             this.handleSubscriptionDelta(String(subid), delta);
           }
