@@ -735,6 +735,10 @@ export class SwarmHubDO {
       };
       group.lastGamesPayload = payload;
       await this.broadcast(group.clients, encodeSseEvent('games', payload));
+
+      setTimeout(() => {
+        void this.pollSportOddsGroup(group);
+      }, 0);
     } catch (e) {
       await this.broadcast(group.clients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
