@@ -557,15 +557,28 @@ export class SwarmHubDO {
           sport: ['id', 'name'],
           region: ['id', 'name'],
           competition: ['id', 'name'],
-          game: ['id', 'type', 'start_ts', 'team1_name', 'team2_name', 'info', 'text_info', 'markets_count'],
+          game: ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'info', 'text_info', 'markets_count'],
           market: ['id', 'type', 'order', 'is_blocked', 'display_key'],
           event: ['id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
         },
-        where: { sport: { id: Number(group.sportId) }, game: { type: group.mode === 'live' ? 1 : 0 } }
+        where: { game: { sport_id: Number(group.sportId), type: group.mode === 'live' ? 1 : 0 } }
       });
+
+      if (response && typeof response === 'object') {
+        const ro = response as Record<string, unknown>;
+        if (ro.code !== undefined && ro.code !== 0) {
+          const msg = ro.msg ? `: ${String(ro.msg)}` : '';
+          throw new Error(`get sport stream failed${msg}`);
+        }
+      }
 
       const data = unwrapSwarmData(response);
       let games = parseGamesFromData(data as any, group.sportName);
+      games = (Array.isArray(games) ? games : []).filter((g) => {
+        const sid = (g as any)?.sport_id;
+        if (sid === null || sid === undefined || sid === '') return true;
+        return String(sid) === String(group.sportId);
+      });
       if (group.mode === 'prematch') {
         games = this.filterPrematchGames(games);
       }
