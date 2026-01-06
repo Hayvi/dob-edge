@@ -37,7 +37,7 @@ function startLiveStream(sportId) {
   liveStreamSportId = key;
 
   const query = key ? `?sportId=${encodeURIComponent(key)}&_=${Date.now()}` : `?_=${Date.now()}`;
-  const es = new EventSource(`/api/live-stream${query}`);
+  const es = new EventSource(apiUrl(`/api/live-stream${query}`));
   liveStreamSource = es;
 
   es.addEventListener('counts', (evt) => {

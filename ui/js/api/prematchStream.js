@@ -39,7 +39,7 @@ function startPrematchStream(sportId) {
 
   const sportName = currentSport?.name ? String(currentSport.name) : '';
   const query = `?sportId=${encodeURIComponent(key)}&sportName=${encodeURIComponent(sportName)}&_=${Date.now()}`;
-  const es = new EventSource(`/api/prematch-stream${query}`);
+  const es = new EventSource(apiUrl(`/api/prematch-stream${query}`));
   prematchStreamSource = es;
 
   es.addEventListener('games', (evt) => {

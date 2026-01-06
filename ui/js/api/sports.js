@@ -2,7 +2,7 @@ async function loadHierarchy(forceRefresh = false) {
   showLoading('Loading sports hierarchy...');
   try {
     const url = forceRefresh ? '/api/hierarchy?refresh=true' : '/api/hierarchy';
-    const response = await fetch(url, { cache: 'no-store' });
+    const response = await fetch(apiUrl(url), { cache: 'no-store' });
     const data = await response.json();
     hierarchy = data.data || data;
 

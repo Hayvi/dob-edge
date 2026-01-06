@@ -28,7 +28,7 @@ function startLiveGameStream(gameId) {
   liveGameId = key;
 
   const query = `?gameId=${encodeURIComponent(key)}&_=${Date.now()}`;
-  const es = new EventSource(`/api/live-game-stream${query}`);
+  const es = new EventSource(apiUrl(`/api/live-game-stream${query}`));
   liveGameSource = es;
 
   es.addEventListener('game', (evt) => {

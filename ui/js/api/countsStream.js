@@ -22,7 +22,7 @@ function startCountsStream() {
   
   stopCountsStream();
   
-  const es = new EventSource(`/api/counts-stream?_=${Date.now()}`);
+  const es = new EventSource(apiUrl(`/api/counts-stream?_=${Date.now()}`));
   countsStreamSource = es;
   
   es.addEventListener('live_counts', (evt) => {

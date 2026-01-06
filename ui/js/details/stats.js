@@ -158,11 +158,11 @@ function hydrateGameStatsInDetails(isLive, statsContainer, serverGameId, team1, 
   // For prematch games, fetch stats from API
   if (!isLive && statsContainer && serverGameId) {
     statsContainer.innerHTML = '<div class="stats-loading">Loading stats...</div>';
-    fetch(`/api/game-stats?gameId=${serverGameId}`)
+    fetch(apiUrl(`/api/game-stats?gameId=${serverGameId}`))
       .then(r => r.json())
       .then(data => {
         if (data.error || !data.stats) {
-          statsContainer.innerHTML = '';
+          statsContainer.innerHTML = '<div class="stats-empty">No stats available</div>';
           return;
         }
         const home = data.stats.home;

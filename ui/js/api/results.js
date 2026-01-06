@@ -122,7 +122,7 @@ async function ensureResultsSportsLoaded(forceRefresh = false) {
   if (!forceRefresh && sportsWithResults instanceof Set) return;
   try {
     // Use competitions endpoint for fast initial load (counts will update when sport is clicked)
-    const res = await fetch(`/api/results/competitions?${getResultsDateParams()}&_=${Date.now()}`, { cache: 'no-store' });
+    const res = await fetch(apiUrl(`/api/results/competitions?${getResultsDateParams()}&_=${Date.now()}`), { cache: 'no-store' });
     if (!res.ok) {
       sportsWithResults = null;
       sportsCountsResults = null;
@@ -163,7 +163,7 @@ async function loadResultGames(sportId, sportName) {
   currentSport = { id: sportId, name: sportName };
 
   try {
-    const response = await fetch(`/api/results/games/${sportId}?${getResultsDateParams()}&_=${Date.now()}`, { cache: 'no-store' });
+    const response = await fetch(apiUrl(`/api/results/games/${sportId}?${getResultsDateParams()}&_=${Date.now()}`), { cache: 'no-store' });
     const data = await response.json();
     
     if (!data.success) {
@@ -204,7 +204,7 @@ async function loadResultGames(sportId, sportName) {
 
 async function loadGameSettlements(gameId) {
   try {
-    const response = await fetch(`/api/results/game/${gameId}?_=${Date.now()}`, { cache: 'no-store' });
+    const response = await fetch(apiUrl(`/api/results/game/${gameId}?_=${Date.now()}`), { cache: 'no-store' });
     const data = await response.json();
     
     if (!data.success) {
