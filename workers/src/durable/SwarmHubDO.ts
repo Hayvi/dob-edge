@@ -484,32 +484,31 @@ export class SwarmHubDO {
 
     if (this.countsClients.size === 1) {
       this.startCountsHeartbeat();
-      void this.ensureCountsSubscriptions().catch((e) => {
-        void this.broadcast(this.countsClients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
-      });
+      setTimeout(() => {
+        void this.ensureCountsSubscriptions().catch((e) => {
+          void this.broadcast(this.countsClients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
+        });
+      }, 0);
     }
 
-    try {
-      await writer.write(encodeSseComment(' '.repeat(2048)));
-      await writer.write(encodeSseComment(`ready ${Date.now()}`));
-    } catch {
-      // ignore
-    }
-
-    if (this.countsLivePayload) {
-      try {
-        await writer.write(encodeSseEvent('live_counts', this.countsLivePayload));
-      } catch {
-        // ignore
-      }
-    }
-    if (this.countsPrematchPayload) {
-      try {
-        await writer.write(encodeSseEvent('prematch_counts', this.countsPrematchPayload));
-      } catch {
-        // ignore
-      }
-    }
+    const initialLivePayload = this.countsLivePayload;
+    const initialPrematchPayload = this.countsPrematchPayload;
+    setTimeout(() => {
+      void (async () => {
+        try {
+          await writer.write(encodeSseComment(' '.repeat(2048)));
+          await writer.write(encodeSseComment(`ready ${Date.now()}`));
+          if (initialLivePayload) {
+            await writer.write(encodeSseEvent('live_counts', initialLivePayload));
+          }
+          if (initialPrematchPayload) {
+            await writer.write(encodeSseEvent('prematch_counts', initialPrematchPayload));
+          }
+        } catch {
+          // ignore
+        }
+      })();
+    }, 0);
 
     return new Response(readable, { status: 200, headers: sseHeaders() });
   }
@@ -568,7 +567,7 @@ export class SwarmHubDO {
           market: ['id', 'type', 'order', 'is_blocked', 'display_key'],
           event: ['id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
         },
-        where: { game: { sport_id: Number(group.sportId), type: group.mode === 'live' ? 1 : 0 } }
+        where: { sport: { id: Number(group.sportId) }, game: { type: group.mode === 'live' ? 1 : 0 } }
       });
 
       if (response && typeof response === 'object') {
@@ -680,36 +679,39 @@ export class SwarmHubDO {
       }
     });
 
-    try {
-      await writer.write(encodeSseComment(' '.repeat(2048)));
-      await writer.write(encodeSseComment(`ready ${Date.now()}`));
-    } catch {
-      // ignore
-    }
+    const initialCountsPayload = mode === 'live' ? this.countsLivePayload : null;
+    const initialPrematchCountsPayload = mode === 'live' ? this.countsPrematchPayload : null;
+    setTimeout(() => {
+      void (async () => {
+        try {
+          await writer.write(encodeSseComment(' '.repeat(2048)));
+          await writer.write(encodeSseComment(`ready ${Date.now()}`));
+          if (mode === 'live') {
+            if (initialCountsPayload) {
+              await writer.write(encodeSseEvent('counts', initialCountsPayload));
+            }
+            if (initialPrematchCountsPayload) {
+              await writer.write(encodeSseEvent('prematch_counts', initialPrematchCountsPayload));
+            }
+          }
+        } catch {
+          // ignore
+        }
+      })();
+    }, 0);
 
     if (mode === 'live') {
       if (!this.countsLiveSubid || !this.countsPrematchSubid) {
-        void this.ensureCountsSubscriptions().catch(() => null);
-      }
-
-      if (this.countsLivePayload) {
-        try {
-          await writer.write(encodeSseEvent('counts', this.countsLivePayload));
-        } catch {
-          // ignore
-        }
-      }
-      if (this.countsPrematchPayload) {
-        try {
-          await writer.write(encodeSseEvent('prematch_counts', this.countsPrematchPayload));
-        } catch {
-          // ignore
-        }
+        setTimeout(() => {
+          void this.ensureCountsSubscriptions().catch(() => null);
+        }, 0);
       }
     }
 
     this.startSportGroup(group);
-    void this.pollSportGroup(group);
+    setTimeout(() => {
+      void this.pollSportGroup(group);
+    }, 0);
 
     return new Response(readable, { status: 200, headers: sseHeaders() });
   }
@@ -791,15 +793,21 @@ export class SwarmHubDO {
       }
     });
 
-    try {
-      await writer.write(encodeSseComment(' '.repeat(2048)));
-      await writer.write(encodeSseComment(`ready ${Date.now()}`));
-    } catch {
-      // ignore
-    }
+    setTimeout(() => {
+      void (async () => {
+        try {
+          await writer.write(encodeSseComment(' '.repeat(2048)));
+          await writer.write(encodeSseComment(`ready ${Date.now()}`));
+        } catch {
+          // ignore
+        }
+      })();
+    }, 0);
 
     this.startGameGroup(group);
-    void this.pollGameGroup(group);
+    setTimeout(() => {
+      void this.pollGameGroup(group);
+    }, 0);
 
     return new Response(readable, { status: 200, headers: sseHeaders() });
   }
