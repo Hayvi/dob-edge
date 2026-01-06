@@ -9,10 +9,6 @@ async function loadHierarchy(forceRefresh = false) {
     if (typeof ensureResultsSportsLoaded === 'function') {
       if (currentMode === 'results') {
         await ensureResultsSportsLoaded(true);
-      } else {
-        setTimeout(() => {
-          void ensureResultsSportsLoaded(true);
-        }, 0);
       }
     }
 
