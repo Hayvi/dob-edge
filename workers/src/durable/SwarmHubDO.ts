@@ -1259,27 +1259,38 @@ export class SwarmHubDO {
     const cached = await this.state.storage.get<HierarchyCache>(cacheKey);
 
     if (!forceRefresh && cached && typeof cached.cachedAtMs === 'number' && cached.data) {
+      const h = (cached.data as any)?.data || cached.data;
+      const sportsNode = h?.sport;
+      const sportCount = sportsNode && typeof sportsNode === 'object'
+        ? (Array.isArray(sportsNode) ? sportsNode.length : Object.keys(sportsNode).length)
+        : 0;
+      const cacheValid = Boolean(sportCount);
+
       const age = Date.now() - cached.cachedAtMs;
       if (age <= ttlMs) {
-        return { ...(cached.data as Record<string, unknown>), cached: true };
-      }
-
-      const refreshPromise = (async () => {
-        try {
-          await this.refreshHierarchyCache(cacheKey);
-        } catch {
-          // ignore
+        if (cacheValid && !forceRefresh) {
+          return { ...(cached.data as Record<string, unknown>), cached: true };
         }
-      })();
-
-      const stateAny = this.state as any;
-      if (stateAny && typeof stateAny.waitUntil === 'function') {
-        stateAny.waitUntil(refreshPromise);
-      } else {
-        void refreshPromise;
       }
 
-      return { ...(cached.data as Record<string, unknown>), cached: true, stale: true };
+      if (cacheValid && !forceRefresh) {
+        const refreshPromise = (async () => {
+          try {
+            await this.refreshHierarchyCache(cacheKey);
+          } catch {
+            // ignore
+          }
+        })();
+
+        const stateAny = this.state as any;
+        if (stateAny && typeof stateAny.waitUntil === 'function') {
+          stateAny.waitUntil(refreshPromise);
+        } else {
+          void refreshPromise;
+        }
+
+        return { ...(cached.data as Record<string, unknown>), cached: true, stale: true };
+      }
     }
 
     const data = await this.refreshHierarchyCache(cacheKey);
@@ -1288,30 +1299,50 @@ export class SwarmHubDO {
 
   private async refreshHierarchyCache(cacheKey: string): Promise<unknown> {
     await this.ensureConnection();
-    const response = await this.sendRequest(
+    const baseParams = {
+      source: 'betting',
+      what: {
+        sport: ['id', 'name', 'alias', 'order'],
+        region: ['id', 'name', 'alias', 'order'],
+        competition: ['id', 'name', 'alias', 'order']
+      }
+    };
+
+    let response = await this.sendRequest(
       'get',
       {
-        source: 'betting',
-        what: {
-          sport: ['id', 'name', 'alias', 'order'],
-          region: ['id', 'name', 'alias', 'order'],
-          competition: ['id', 'name', 'alias', 'order']
-        },
+        ...baseParams,
         where: { sport: { type: { '@nin': [1, 4] } } }
       },
       60000
     );
-    const data = unwrapSwarmData(response);
 
-    const h = (data as any)?.data || data;
-    const sportsNode = h?.sport;
-    const sportCount = sportsNode && typeof sportsNode === 'object'
+    let data = unwrapSwarmData(response);
+
+    let h = (data as any)?.data || data;
+    let sportsNode = h?.sport;
+    let sportCount = sportsNode && typeof sportsNode === 'object'
       ? (Array.isArray(sportsNode) ? sportsNode.length : Object.keys(sportsNode).length)
       : 0;
 
     if (!sportCount) {
+      response = await this.sendRequest('get', baseParams, 60000);
+      data = unwrapSwarmData(response);
+      h = (data as any)?.data || data;
+      sportsNode = h?.sport;
+      sportCount = sportsNode && typeof sportsNode === 'object'
+        ? (Array.isArray(sportsNode) ? sportsNode.length : Object.keys(sportsNode).length)
+        : 0;
+    }
+
+    if (!sportCount) {
       const previous = await this.state.storage.get<HierarchyCache>(cacheKey);
-      if (previous && previous.data) return previous.data;
+      if (previous && previous.data) {
+        const ph = (previous.data as any)?.data || previous.data;
+        const ps = ph?.sport;
+        const pc = ps && typeof ps === 'object' ? (Array.isArray(ps) ? ps.length : Object.keys(ps).length) : 0;
+        if (pc) return previous.data;
+      }
       throw new Error('Hierarchy refresh returned 0 sports');
     }
 

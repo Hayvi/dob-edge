@@ -12,6 +12,14 @@ function readHierarchyCache() {
     if (Date.now() - cachedAtMs > HIERARCHY_CACHE_TTL_MS) return null;
     const data = parsed.data;
     if (!data) return null;
+
+    const h = data && typeof data === 'object' ? (data.data || data) : null;
+    const sportsNode = h && typeof h === 'object' ? h.sport : null;
+    const sportsCount = sportsNode && typeof sportsNode === 'object'
+      ? (Array.isArray(sportsNode) ? sportsNode.length : Object.keys(sportsNode).length)
+      : 0;
+    if (!sportsCount) return null;
+
     return data;
   } catch {
     return null;
