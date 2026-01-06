@@ -27,6 +27,8 @@ function withCors(request: Request, response: Response): Response {
   if (allowed) {
     headers.set('Access-Control-Allow-Origin', allowed);
     headers.append('Vary', 'Origin');
+  } else {
+    headers.set('Access-Control-Allow-Origin', '*');
   }
   headers.set('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   headers.set('Access-Control-Allow-Headers', 'Content-Type');
