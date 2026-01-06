@@ -1,7 +1,6 @@
 import type { Env } from '../env.js';
 import { getCountsFp, getGameFp, getOddsFp, getSportFp } from '../lib/fingerprints.js';
 import { buildOddsArrFromMarket, getSportMainMarketTypePriority, pickPreferredMarketFromEmbedded } from '../lib/odds.js';
-import { parseGamesFromData } from '../lib/parseGamesFromData.js';
 import { extractSportsCountsFromSwarm } from '../lib/swarmCounts.js';
 
 type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
@@ -147,6 +146,11 @@ export class SwarmHubDO {
   private countsLastPrematchFp = '';
   private countsLivePayload: unknown = null;
   private countsPrematchPayload: unknown = null;
+
+  private hierarchyMapsAtMs = 0;
+  private hierarchySportNameById: Record<string, string> = {};
+  private hierarchyRegionNameById: Record<string, string> = {};
+  private hierarchyCompetitionNameById: Record<string, string> = {};
 
   private liveGroups: Map<string, SportStreamGroup> = new Map();
   private prematchGroups: Map<string, SportStreamGroup> = new Map();
@@ -564,6 +568,44 @@ export class SwarmHubDO {
     });
   }
 
+  private async ensureHierarchyNameMaps(): Promise<void> {
+    const cacheKey = 'hierarchy_cache';
+    const cached = await this.state.storage.get<HierarchyCache>(cacheKey);
+    if (!cached || typeof cached.cachedAtMs !== 'number' || !cached.data) return;
+    if (cached.cachedAtMs === this.hierarchyMapsAtMs) return;
+
+    const raw = cached.data as any;
+    const h = raw?.data || raw;
+    const sports = h?.sport && typeof h.sport === 'object' ? h.sport : {};
+    const regions = h?.region && typeof h.region === 'object' ? h.region : {};
+    const competitions = h?.competition && typeof h.competition === 'object' ? h.competition : {};
+
+    const sportById: Record<string, string> = {};
+    const regionById: Record<string, string> = {};
+    const competitionById: Record<string, string> = {};
+
+    for (const [id, s] of Object.entries(sports)) {
+      if (!s || typeof s !== 'object') continue;
+      const name = (s as any)?.name;
+      if (name) sportById[String(id)] = String(name);
+    }
+    for (const [id, r] of Object.entries(regions)) {
+      if (!r || typeof r !== 'object') continue;
+      const name = (r as any)?.name;
+      if (name) regionById[String(id)] = String(name);
+    }
+    for (const [id, c] of Object.entries(competitions)) {
+      if (!c || typeof c !== 'object') continue;
+      const name = (c as any)?.name;
+      if (name) competitionById[String(id)] = String(name);
+    }
+
+    this.hierarchyMapsAtMs = cached.cachedAtMs;
+    this.hierarchySportNameById = sportById;
+    this.hierarchyRegionNameById = regionById;
+    this.hierarchyCompetitionNameById = competitionById;
+  }
+
   private startSportGroup(group: SportStreamGroup): void {
     if (group.cleanupTimer != null) {
       clearTimeout(group.cleanupTimer);
@@ -614,15 +656,14 @@ export class SwarmHubDO {
           ? ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'is_blocked', 'info', 'text_info', 'markets_count']
           : ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'is_blocked', 'visible_in_prematch', 'markets_count'];
 
+      const gameFieldsWithGroups = [...gameFields, 'region', 'competition', 'region_id', 'competition_id'];
+
       const response = await this.sendRequest(
         'get',
         {
           source: 'betting',
           what: {
-            sport: ['id', 'name'],
-            region: ['id', 'name'],
-            competition: ['id', 'name'],
-            game: gameFields
+            game: gameFieldsWithGroups
           },
           where:
             group.mode === 'live'
@@ -646,7 +687,7 @@ export class SwarmHubDO {
       }
 
       const data = unwrapSwarmData(response);
-      let games = parseGamesFromData(data as any, group.sportName, group.sportId);
+      let games = this.extractGamesFromNode((data as any)?.game);
       games = (Array.isArray(games) ? games : []).filter((g) => {
         const sid = (g as any)?.sport_id;
         if (sid === null || sid === undefined || sid === '') return true;
@@ -654,6 +695,47 @@ export class SwarmHubDO {
       });
       if (group.mode === 'prematch') {
         games = this.filterPrematchGames(games);
+      }
+
+      try {
+        await this.ensureHierarchyNameMaps();
+      } catch {
+        // ignore
+      }
+
+      const regionById = this.hierarchyRegionNameById;
+      const competitionById = this.hierarchyCompetitionNameById;
+      const sportById = this.hierarchySportNameById;
+      const maybeSportName = sportById[String(group.sportId)];
+      if (maybeSportName && (!group.sportName || group.sportName === group.sportId)) {
+        group.sportName = maybeSportName;
+      }
+
+      for (const g of games) {
+        if (!g || typeof g !== 'object') continue;
+        const go = g as any;
+
+        const regRaw = go?.region_id ?? go?.regionId ?? go?.region;
+        const regId = regRaw !== null && regRaw !== undefined && regRaw !== '' && (typeof regRaw === 'number' || typeof regRaw === 'string')
+          ? String(regRaw)
+          : null;
+        const regionName = (typeof regRaw === 'object' && regRaw && !Array.isArray(regRaw) && (regRaw as any).name)
+          ? String((regRaw as any).name)
+          : (regId ? (regionById[regId] || regId) : null);
+        if (regionName && (!go.region || typeof go.region !== 'string')) {
+          go.region = regionName;
+        }
+
+        const compRaw = go?.competition_id ?? go?.competitionId ?? go?.competition;
+        const compId = compRaw !== null && compRaw !== undefined && compRaw !== '' && (typeof compRaw === 'number' || typeof compRaw === 'string')
+          ? String(compRaw)
+          : null;
+        const competitionName = (typeof compRaw === 'object' && compRaw && !Array.isArray(compRaw) && (compRaw as any).name)
+          ? String((compRaw as any).name)
+          : (compId ? (competitionById[compId] || compId) : null);
+        if (competitionName && (!go.competition || typeof go.competition !== 'string')) {
+          go.competition = competitionName;
+        }
       }
 
       const nextIds: string[] = [];
@@ -706,6 +788,67 @@ export class SwarmHubDO {
     return vals.filter((v) => v && typeof v === 'object' && !Array.isArray(v)) as any[];
   }
 
+  private embedMarketsIntoGame(game: any, data: any, gameId: string): void {
+    if (!game || typeof game !== 'object') return;
+
+    const marketMap: Record<string, any> = {};
+    const existingMarket = (game as any).market;
+    if (existingMarket && typeof existingMarket === 'object' && !Array.isArray(existingMarket)) {
+      for (const [k, v] of Object.entries(existingMarket as Record<string, unknown>)) {
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+          const ev = (v as any).event;
+          marketMap[String(k)] = { ...(v as any), event: (ev && typeof ev === 'object' && !Array.isArray(ev)) ? ev : {} };
+        }
+      }
+    }
+
+    const marketsNode = data?.market;
+    const markets = marketsNode && typeof marketsNode === 'object'
+      ? (Array.isArray(marketsNode) ? marketsNode : Object.values(marketsNode as Record<string, unknown>))
+      : [];
+
+    for (const mRaw of markets) {
+      const m = mRaw && typeof mRaw === 'object' && !Array.isArray(mRaw) ? (mRaw as any) : null;
+      if (!m) continue;
+      const gid = m?.game_id ?? m?.gameId;
+      if (gid === null || gid === undefined || gid === '') continue;
+      if (String(gid) !== String(gameId)) continue;
+
+      const mid = m?.id;
+      if (mid === null || mid === undefined || mid === '') continue;
+      const midStr = String(mid);
+      const prev = marketMap[midStr] && typeof marketMap[midStr] === 'object' ? marketMap[midStr] : {};
+      const prevEvent = prev?.event && typeof prev.event === 'object' && !Array.isArray(prev.event) ? prev.event : {};
+      marketMap[midStr] = { ...prev, ...m, event: prevEvent };
+    }
+
+    const eventsNode = data?.event;
+    const events = eventsNode && typeof eventsNode === 'object'
+      ? (Array.isArray(eventsNode) ? eventsNode : Object.values(eventsNode as Record<string, unknown>))
+      : [];
+
+    for (const eRaw of events) {
+      const e = eRaw && typeof eRaw === 'object' && !Array.isArray(eRaw) ? (eRaw as any) : null;
+      if (!e) continue;
+      const mid = e?.market_id ?? e?.marketId;
+      if (mid === null || mid === undefined || mid === '') continue;
+      const midStr = String(mid);
+      const market = marketMap[midStr];
+      if (!market || typeof market !== 'object') continue;
+      if (!market.event || typeof market.event !== 'object' || Array.isArray(market.event)) market.event = {};
+      const eid = e?.id;
+      if (eid === null || eid === undefined || eid === '') continue;
+      market.event[String(eid)] = e;
+    }
+
+    if (Object.keys(marketMap).length > 0) {
+      (game as any).market = marketMap;
+      if (typeof (game as any).markets_count !== 'number') {
+        (game as any).markets_count = Object.keys(marketMap).length;
+      }
+    }
+  }
+
   private maybeRebuildOddsSnapshot(group: SportStreamGroup): void {
     const now = Date.now();
     if (group.lastOddsPayload && now - group.lastOddsSnapshotAtMs < ODDS_SNAPSHOT_REBUILD_MS) return;
@@ -727,6 +870,8 @@ export class SwarmHubDO {
       return;
     }
     if (group.oddsInFlight) return;
+    if (group.pollInFlight) return;
+    if (!group.lastGamesPayload) return;
 
     const allIds = Array.isArray(group.oddsGameIds) ? group.oddsGameIds : [];
     if (allIds.length === 0) return;
@@ -768,7 +913,7 @@ export class SwarmHubDO {
           },
           where: { game: { id: { '@in': whereIds } } }
         },
-        60000
+        20000
       );
 
       if (response && typeof response === 'object') {
@@ -999,8 +1144,8 @@ export class SwarmHubDO {
           source: 'betting',
           what: {
             game: ['id', 'type', 'start_ts', 'team1_name', 'team2_name', 'info', 'text_info', 'markets_count'],
-            market: ['id', 'type', 'order', 'is_blocked', 'display_key'],
-            event: ['id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
+            market: ['id', 'game_id', 'type', 'order', 'is_blocked', 'display_key'],
+            event: ['id', 'market_id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
           },
           where: { game: { id: whereId } }
         },
@@ -1025,8 +1170,11 @@ export class SwarmHubDO {
           }
         }
       }
-      const fp = getGameFp(game);
-      if (fp && fp === group.lastFp) return;
+
+      this.embedMarketsIntoGame(game, data, group.gameId);
+
+      const fp = getGameFp(game) || (game ? getSportFp([game]) : '');
+      if (fp === group.lastFp && group.lastPayload) return;
       group.lastFp = fp;
 
       const payload = { gameId: group.gameId, data: game, last_updated: new Date().toISOString() };
