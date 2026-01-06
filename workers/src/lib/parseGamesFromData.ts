@@ -103,5 +103,32 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown'): any[] {
     }
   }
 
+  if (allGames.length === 0 && data && data.game && typeof data.game === 'object') {
+    for (const [k, v] of Object.entries(data.game)) {
+      if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+      const game = v as AnyObj;
+
+      let regionName = 'Unknown';
+      const regionRef = (game as any)?.region ?? (game as any)?.region_id ?? (game as any)?.regionId;
+      if (regionRef !== null && regionRef !== undefined && regionRef !== '') {
+        const region = resolveFromMap(regionRef, null, data.region || null) as AnyObj | null;
+        regionName = String(region?.name || regionRef);
+      }
+
+      let competitionName = 'Unknown';
+      const compRef = (game as any)?.competition ?? (game as any)?.competition_id ?? (game as any)?.competitionId;
+      if (compRef !== null && compRef !== undefined && compRef !== '') {
+        const comp = resolveFromMap(compRef, null, data.competition || null) as AnyObj | null;
+        competitionName = String(comp?.name || compRef);
+      }
+
+      if (game.id === null || game.id === undefined || game.id === '') {
+        game.id = k;
+      }
+
+      pushGame(game, regionName, competitionName);
+    }
+  }
+
   return allGames;
 }
