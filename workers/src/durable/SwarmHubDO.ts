@@ -869,8 +869,8 @@ export class SwarmHubDO {
           source: 'betting',
           what: {
             game: ['id', 'markets_count'],
-            market: ['id', 'type', 'order', 'is_blocked', 'display_key'],
-            event: ['id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
+            market: ['id', 'game_id', 'type', 'order', 'is_blocked', 'display_key'],
+            event: ['id', 'market_id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
           },
           where: { game: { id: { '@in': whereIds } } }
         },
@@ -893,10 +893,36 @@ export class SwarmHubDO {
       for (const g of games) {
         const gid = (g as any)?.id ?? (g as any)?.gameId;
         if (gid === null || gid === undefined || gid === '') continue;
+        this.embedMarketsIntoGame(g, data, String(gid));
+      }
+
+      for (const g of games) {
+        const gid = (g as any)?.id ?? (g as any)?.gameId;
+        if (gid === null || gid === undefined || gid === '') continue;
         const idStr = String(gid);
 
         const marketMap = (g as any)?.market;
-        const market = pickPreferredMarketFromEmbedded(marketMap, typePriority);
+        let market = pickPreferredMarketFromEmbedded(marketMap, typePriority);
+        if (!market && marketMap && typeof marketMap === 'object') {
+          const markets = Object.values(marketMap as Record<string, unknown>)
+            .map((mRaw) => (mRaw && typeof mRaw === 'object' && !Array.isArray(mRaw) ? (mRaw as any) : null))
+            .filter(Boolean) as any[];
+
+          markets.sort((a, b) => {
+            const ao = typeof a?.order === 'number' ? Number(a.order) : Number.MAX_SAFE_INTEGER;
+            const bo = typeof b?.order === 'number' ? Number(b.order) : Number.MAX_SAFE_INTEGER;
+            if (ao !== bo) return ao - bo;
+            return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+          });
+
+          const candidate = markets.find((m) => {
+            const ev = m?.event;
+            const cnt = ev && typeof ev === 'object' && !Array.isArray(ev) ? Object.keys(ev).length : 0;
+            return cnt === 2 || cnt === 3;
+          });
+          if (candidate) market = candidate;
+        }
+
         const oddsArr = buildOddsArrFromMarket(market);
         const marketsCount = typeof (g as any)?.markets_count === 'number'
           ? Number((g as any).markets_count)
@@ -904,11 +930,11 @@ export class SwarmHubDO {
         const fp = getOddsFp(market);
 
         const prev = group.oddsCache.get(idStr);
-        if (!prev || prev.fp !== fp) {
+        const prevCount = typeof prev?.markets_count === 'number' ? Number(prev.markets_count) : null;
+        const shouldEmit = !prev || prev.fp !== fp || (typeof prevCount === 'number' && prevCount !== marketsCount);
+        if (shouldEmit) {
           group.oddsCache.set(idStr, { odds: oddsArr, markets_count: marketsCount, fp, updatedAtMs: now });
-          if (Array.isArray(oddsArr)) {
-            updates.push({ gameId: gid, odds: oddsArr, markets_count: marketsCount });
-          }
+          updates.push({ gameId: gid, odds: Array.isArray(oddsArr) ? oddsArr : null, markets_count: marketsCount });
         } else {
           group.oddsCache.set(idStr, { ...prev, updatedAtMs: now, markets_count: marketsCount });
         }
