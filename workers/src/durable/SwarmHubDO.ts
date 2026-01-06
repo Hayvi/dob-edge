@@ -1034,15 +1034,38 @@ export class SwarmHubDO {
 
   private async getHierarchy(forceRefresh: boolean): Promise<unknown> {
     const cacheKey = 'hierarchy_cache';
-    if (!forceRefresh) {
-      const cached = await this.state.storage.get<HierarchyCache>(cacheKey);
-      if (cached && typeof cached.cachedAtMs === 'number' && cached.data) {
-        if (Date.now() - cached.cachedAtMs <= 5 * 60 * 1000) {
-          return { ...(cached.data as Record<string, unknown>), cached: true };
-        }
+    const ttlMs = 30 * 60 * 1000;
+    const cached = await this.state.storage.get<HierarchyCache>(cacheKey);
+
+    if (!forceRefresh && cached && typeof cached.cachedAtMs === 'number' && cached.data) {
+      const age = Date.now() - cached.cachedAtMs;
+      if (age <= ttlMs) {
+        return { ...(cached.data as Record<string, unknown>), cached: true };
       }
+
+      const refreshPromise = (async () => {
+        try {
+          await this.refreshHierarchyCache(cacheKey);
+        } catch {
+          // ignore
+        }
+      })();
+
+      const stateAny = this.state as any;
+      if (stateAny && typeof stateAny.waitUntil === 'function') {
+        stateAny.waitUntil(refreshPromise);
+      } else {
+        void refreshPromise;
+      }
+
+      return { ...(cached.data as Record<string, unknown>), cached: true, stale: true };
     }
 
+    const data = await this.refreshHierarchyCache(cacheKey);
+    return { ...(data as Record<string, unknown>), cached: false };
+  }
+
+  private async refreshHierarchyCache(cacheKey: string): Promise<unknown> {
     await this.ensureConnection();
     const response = await this.sendRequest('get', {
       source: 'betting',
@@ -1054,7 +1077,7 @@ export class SwarmHubDO {
     });
     const data = unwrapSwarmData(response);
     await this.state.storage.put(cacheKey, { cachedAtMs: Date.now(), data });
-    return { ...(data as Record<string, unknown>), cached: false };
+    return data;
   }
 
   private async getActiveCompetitions(fromDate?: number, toDate?: number): Promise<unknown> {
@@ -1135,7 +1158,12 @@ export class SwarmHubDO {
       const forceRefresh = url.searchParams.get('refresh') === 'true';
       try {
         const hierarchy = await this.getHierarchy(forceRefresh);
-        return json(hierarchy as JsonValue);
+        const resp = json(hierarchy as JsonValue);
+        if (forceRefresh) return resp;
+
+        const headers = new Headers(resp.headers);
+        headers.set('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+        return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
       } catch (e) {
         return json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
       }
