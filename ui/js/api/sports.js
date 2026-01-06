@@ -7,7 +7,13 @@ async function loadHierarchy(forceRefresh = false) {
     hierarchy = data.data || data;
 
     if (typeof ensureResultsSportsLoaded === 'function') {
-      await ensureResultsSportsLoaded(true);
+      if (currentMode === 'results') {
+        await ensureResultsSportsLoaded(true);
+      } else {
+        setTimeout(() => {
+          void ensureResultsSportsLoaded(true);
+        }, 0);
+      }
     }
 
     renderSportsList();
