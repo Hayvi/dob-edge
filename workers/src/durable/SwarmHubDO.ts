@@ -36,6 +36,8 @@ type SportStreamGroup = {
   timer: number | null;
   lastFp: string;
   lastOddsFp: string;
+  lastGamesPayload: unknown | null;
+  lastOddsPayload: unknown | null;
 };
 
 type GameStreamGroup = {
@@ -614,14 +616,16 @@ export class SwarmHubDO {
       const oddsFp = oddsFpParts.sort().join('~');
       if (oddsFp && oddsFp !== group.lastOddsFp) {
         group.lastOddsFp = oddsFp;
+        const oddsPayload = { sportId: group.sportId, updates: oddsUpdates };
+        group.lastOddsPayload = oddsPayload;
         await this.broadcast(
           group.clients,
-          encodeSseEvent('odds', { sportId: group.sportId, updates: oddsUpdates })
+          encodeSseEvent('odds', oddsPayload)
         );
       }
 
       const fp = getSportFp(games);
-      if (fp && fp === group.lastFp) return;
+      if (fp && fp === group.lastFp && group.lastGamesPayload) return;
       group.lastFp = fp;
 
       const payload = {
@@ -630,6 +634,7 @@ export class SwarmHubDO {
         data: games,
         last_updated: new Date().toISOString()
       };
+      group.lastGamesPayload = payload;
       await this.broadcast(group.clients, encodeSseEvent('games', payload));
     } catch (e) {
       await this.broadcast(group.clients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
@@ -650,7 +655,17 @@ export class SwarmHubDO {
     const groups = mode === 'live' ? this.liveGroups : this.prematchGroups;
     let group = groups.get(key);
     if (!group) {
-      group = { sportId: key, sportName, mode, clients: new Map(), timer: null, lastFp: '', lastOddsFp: '' };
+      group = {
+        sportId: key,
+        sportName,
+        mode,
+        clients: new Map(),
+        timer: null,
+        lastFp: '',
+        lastOddsFp: '',
+        lastGamesPayload: null,
+        lastOddsPayload: null
+      };
       groups.set(key, group);
     } else if (!group.sportName && sportName) {
       group.sportName = sportName;
@@ -684,6 +699,8 @@ export class SwarmHubDO {
 
     const initialCountsPayload = mode === 'live' ? this.countsLivePayload : null;
     const initialPrematchCountsPayload = mode === 'live' ? this.countsPrematchPayload : null;
+    const initialGamesPayload = group.lastGamesPayload;
+    const initialOddsPayload = group.lastOddsPayload;
     setTimeout(() => {
       void (async () => {
         try {
@@ -696,6 +713,12 @@ export class SwarmHubDO {
             if (initialPrematchCountsPayload) {
               await writer.write(encodeSseEvent('prematch_counts', initialPrematchCountsPayload));
             }
+          }
+          if (initialGamesPayload) {
+            await writer.write(encodeSseEvent('games', initialGamesPayload));
+          }
+          if (initialOddsPayload) {
+            await writer.write(encodeSseEvent('odds', initialOddsPayload));
           }
         } catch {
           // ignore
