@@ -17,8 +17,12 @@ async function loadGames(sportId, sportName) {
     welcomeScreen.classList.add('hidden');
     gamesContainer.classList.remove('hidden');
     document.getElementById('selectedSportName').textContent = sportName;
-    document.getElementById('gamesCount').textContent = '0 games';
+    document.getElementById('gamesCount').textContent = 'Loading games...';
     document.getElementById('lastUpdated').textContent = '';
+    const regionsTree = document.getElementById('regionsTree');
+    if (regionsTree) {
+      regionsTree.innerHTML = '<div class="loading">Loading games...</div>';
+    }
 
     if (currentMode === 'live' && typeof startLiveStream === 'function') {
       startLiveStream(sportId);

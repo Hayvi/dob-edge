@@ -557,13 +557,18 @@ export class SwarmHubDO {
     }
 
     try {
+      const gameFields =
+        group.mode === 'live'
+          ? ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'info', 'text_info', 'markets_count']
+          : ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'markets_count'];
+
       const response = await this.sendRequest('get', {
         source: 'betting',
         what: {
           sport: ['id', 'name'],
           region: ['id', 'name'],
           competition: ['id', 'name'],
-          game: ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'info', 'text_info', 'markets_count']
+          game: gameFields
         },
         where: { sport: { id: Number(group.sportId) }, game: { type: group.mode === 'live' ? 1 : 0 } }
       });
