@@ -489,6 +489,13 @@ export class SwarmHubDO {
       });
     }
 
+    try {
+      await writer.write(encodeSseComment(' '.repeat(2048)));
+      await writer.write(encodeSseComment(`ready ${Date.now()}`));
+    } catch {
+      // ignore
+    }
+
     if (this.countsLivePayload) {
       try {
         await writer.write(encodeSseEvent('live_counts', this.countsLivePayload));
@@ -674,6 +681,7 @@ export class SwarmHubDO {
     });
 
     try {
+      await writer.write(encodeSseComment(' '.repeat(2048)));
       await writer.write(encodeSseComment(`ready ${Date.now()}`));
     } catch {
       // ignore
@@ -782,6 +790,13 @@ export class SwarmHubDO {
         this.liveGameGroups.delete(key);
       }
     });
+
+    try {
+      await writer.write(encodeSseComment(' '.repeat(2048)));
+      await writer.write(encodeSseComment(`ready ${Date.now()}`));
+    } catch {
+      // ignore
+    }
 
     this.startGameGroup(group);
     void this.pollGameGroup(group);
