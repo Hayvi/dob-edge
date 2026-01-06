@@ -427,7 +427,7 @@ export class SwarmHubDO {
         {
           source: 'betting',
           what: { sport: ['id', 'name'], game: ['id'] },
-          where: { game: { type: 1 } }
+          where: { sport: { type: { '@nin': [1, 4] } }, game: { type: 1 } }
         },
         (data) => this.handleCountsEmit('live', data)
       );
@@ -438,7 +438,12 @@ export class SwarmHubDO {
         {
           source: 'betting',
           what: { sport: ['id', 'name'], game: ['id'] },
-          where: { game: { type: 0 } }
+          where: {
+            sport: { type: { '@nin': [1, 4] } },
+            game: {
+              '@or': [{ visible_in_prematch: 1 }, { type: { '@in': [0, 2] } }]
+            }
+          }
         },
         (data) => this.handleCountsEmit('prematch', data)
       );
@@ -530,12 +535,8 @@ export class SwarmHubDO {
   }
 
   private filterPrematchGames(games: any[]): any[] {
-    const nowSec = Math.floor(Date.now() / 1000);
-    const cutoffSec = nowSec + 5 * 60;
     return (Array.isArray(games) ? games : []).filter((g) => {
-      const ts = Number(g?.start_ts);
-      if (!Number.isFinite(ts) || ts <= 0) return true;
-      return ts > cutoffSec;
+      return g?.visible_in_prematch === 1 || [0, 2].includes(Number(g?.type));
     });
   }
 
@@ -561,8 +562,8 @@ export class SwarmHubDO {
     try {
       const gameFields =
         group.mode === 'live'
-          ? ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'info', 'text_info', 'markets_count']
-          : ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'markets_count'];
+          ? ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'is_blocked', 'info', 'text_info', 'markets_count']
+          : ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'is_blocked', 'visible_in_prematch', 'markets_count'];
 
       const response = await this.sendRequest('get', {
         source: 'betting',
@@ -572,7 +573,15 @@ export class SwarmHubDO {
           competition: ['id', 'name'],
           game: gameFields
         },
-        where: { sport: { id: Number(group.sportId) }, game: { type: group.mode === 'live' ? 1 : 0 } }
+        where:
+          group.mode === 'live'
+            ? { sport: { id: Number(group.sportId) }, game: { type: 1 } }
+            : {
+                sport: { id: Number(group.sportId) },
+                game: {
+                  '@or': [{ visible_in_prematch: 1 }, { type: { '@in': [0, 2] } }]
+                }
+              }
       });
 
       if (response && typeof response === 'object') {
