@@ -734,6 +734,8 @@ export class SwarmHubDO {
     }
 
     try {
+      const gidNum = Number(group.gameId);
+      const whereId = Number.isFinite(gidNum) ? gidNum : String(group.gameId);
       const response = await this.sendRequest('get', {
         source: 'betting',
         what: {
@@ -741,11 +743,27 @@ export class SwarmHubDO {
           market: ['id', 'type', 'order', 'is_blocked', 'display_key'],
           event: ['id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
         },
-        where: { game: { id: String(group.gameId) } }
+        where: { game: { id: whereId } }
       });
 
       const data = unwrapSwarmData(response) as any;
-      const game = (data?.game && typeof data.game === 'object') ? (data.game[String(group.gameId)] || null) : null;
+      let game: any = null;
+      const gamesNode = data?.game;
+      if (gamesNode && typeof gamesNode === 'object') {
+        if (Array.isArray(gamesNode)) {
+          game = gamesNode.find((g) => g && String((g as any).id) === String(group.gameId)) || null;
+        } else {
+          game = gamesNode[String(group.gameId)] ?? gamesNode[group.gameId] ?? null;
+          if (!game) {
+            const vals = Object.values(gamesNode as Record<string, unknown>);
+            if (vals.length === 1 && vals[0] && typeof vals[0] === 'object' && !Array.isArray(vals[0])) {
+              game = vals[0];
+            } else {
+              game = vals.find((g: any) => g && typeof g === 'object' && String(g.id) === String(group.gameId)) || null;
+            }
+          }
+        }
+      }
       const fp = getGameFp(game);
       if (fp && fp === group.lastFp) return;
       group.lastFp = fp;
