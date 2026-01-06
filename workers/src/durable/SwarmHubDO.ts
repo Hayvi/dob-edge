@@ -563,9 +563,7 @@ export class SwarmHubDO {
           sport: ['id', 'name'],
           region: ['id', 'name'],
           competition: ['id', 'name'],
-          game: ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'info', 'text_info', 'markets_count'],
-          market: ['id', 'type', 'order', 'is_blocked', 'display_key'],
-          event: ['id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
+          game: ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'info', 'text_info', 'markets_count']
         },
         where: { sport: { id: Number(group.sportId) }, game: { type: group.mode === 'live' ? 1 : 0 } }
       });
