@@ -1,6 +1,6 @@
 type AnyObj = Record<string, any>;
 
-export function parseGamesFromData(rawData: any, sportName = 'Unknown'): any[] {
+export function parseGamesFromData(rawData: any, sportName = 'Unknown', sportId: string | number | null = null): any[] {
   let data: any = rawData;
 
   if (rawData && rawData.data) {
@@ -12,7 +12,7 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown'): any[] {
 
   const allGames: any[] = [];
 
-  const pushGame = (game: AnyObj, regionName: string, competitionName: string) => {
+  const pushGame = (game: AnyObj, regionName: string, competitionName: string, resolvedSportName: string = sportName) => {
     const markets: AnyObj = {};
     if (game.market) {
       for (const mId in game.market) {
@@ -29,7 +29,7 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown'): any[] {
 
     allGames.push({
       ...game,
-      sport: sportName,
+      sport: resolvedSportName,
       region: regionName,
       competition: competitionName,
       market: markets
@@ -63,7 +63,36 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown'): any[] {
     return [];
   };
 
-  if (data && data.region) {
+  const targetSportId = sportId === null || sportId === undefined || sportId === '' ? null : String(sportId);
+  if (targetSportId && data && data.sport && data.sport[targetSportId]) {
+    const sport = data.sport[targetSportId];
+    const resolvedSportName = String(sport?.name || sportName);
+
+    if (sport?.region) {
+      const regions = resolveCollection(sport.region, data.region);
+      for (const region of regions) {
+        const competitions = resolveCollection((region as any)?.competition, sport.competition || data.competition);
+        for (const competition of competitions) {
+          const games = resolveCollection((competition as any)?.game, sport.game || data.game);
+          for (const game of games) {
+            pushGame(game as AnyObj, (region as any)?.name, (competition as any)?.name, resolvedSportName);
+          }
+        }
+      }
+    } else if (sport?.competition) {
+      const competitions = resolveCollection(sport.competition, data.competition);
+      for (const competition of competitions) {
+        const games = resolveCollection((competition as any)?.game, sport.game || data.game);
+        for (const game of games) {
+          pushGame(game as AnyObj, resolvedSportName, (competition as any)?.name, resolvedSportName);
+        }
+      }
+    }
+  }
+
+  if (targetSportId && allGames.length > 0) return allGames;
+
+  if (!targetSportId && data && data.region) {
     for (const regionId in data.region) {
       const region = data.region[regionId];
       const competitions = resolveCollection(region?.competition, data.competition);
@@ -77,8 +106,10 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown'): any[] {
   }
 
   if (allGames.length === 0 && data && data.sport) {
-    for (const sId in data.sport) {
-      const sport = data.sport[sId];
+    const entries = targetSportId ? [[targetSportId, data.sport[targetSportId]]] : Object.entries(data.sport);
+    for (const [sId, sport] of entries) {
+      if (!sport) continue;
+      const resolvedSportName = String((sport as any)?.name || sportName);
 
       if (sport?.region) {
         const regions = resolveCollection(sport.region, data.region);
@@ -87,7 +118,7 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown'): any[] {
           for (const competition of competitions) {
             const games = resolveCollection((competition as any)?.game, sport.game || data.game);
             for (const game of games) {
-              pushGame(game as AnyObj, (region as any)?.name, (competition as any)?.name);
+              pushGame(game as AnyObj, (region as any)?.name, (competition as any)?.name, resolvedSportName);
             }
           }
         }
@@ -96,7 +127,7 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown'): any[] {
         for (const competition of competitions) {
           const games = resolveCollection((competition as any)?.game, sport.game || data.game);
           for (const game of games) {
-            pushGame(game as AnyObj, (sport as any)?.name, (competition as any)?.name);
+            pushGame(game as AnyObj, resolvedSportName, (competition as any)?.name, resolvedSportName);
           }
         }
       }

@@ -579,7 +579,7 @@ export class SwarmHubDO {
       }
 
       const data = unwrapSwarmData(response);
-      let games = parseGamesFromData(data as any, group.sportName);
+      let games = parseGamesFromData(data as any, group.sportName, group.sportId);
       games = (Array.isArray(games) ? games : []).filter((g) => {
         const sid = (g as any)?.sport_id;
         if (sid === null || sid === undefined || sid === '') return true;
