@@ -1,6 +1,7 @@
 import type { Env } from '../env.js';
 import { getCountsFp, getGameFp, getOddsFp, getSportFp } from '../lib/fingerprints.js';
 import { buildOddsArrFromMarket, getSportMainMarketTypePriority, pickPreferredMarketFromEmbedded } from '../lib/odds.js';
+import { parseGamesFromData } from '../lib/parseGamesFromData.js';
 import { extractSportsCountsFromSwarm } from '../lib/swarmCounts.js';
 
 type JsonValue = string | number | boolean | null | { [key: string]: JsonValue } | JsonValue[];
@@ -656,14 +657,15 @@ export class SwarmHubDO {
           ? ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'is_blocked', 'info', 'text_info', 'markets_count']
           : ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'is_blocked', 'visible_in_prematch', 'markets_count'];
 
-      const gameFieldsWithGroups = [...gameFields, 'region', 'competition', 'region_id', 'competition_id'];
-
       const response = await this.sendRequest(
         'get',
         {
           source: 'betting',
           what: {
-            game: gameFieldsWithGroups
+            sport: ['id', 'name'],
+            region: ['id', 'name'],
+            competition: ['id', 'name'],
+            game: gameFields
           },
           where:
             group.mode === 'live'
@@ -687,7 +689,7 @@ export class SwarmHubDO {
       }
 
       const data = unwrapSwarmData(response);
-      let games = this.extractGamesFromNode((data as any)?.game);
+      let games = parseGamesFromData(data as any, group.sportName, group.sportId);
       games = (Array.isArray(games) ? games : []).filter((g) => {
         const sid = (g as any)?.sport_id;
         if (sid === null || sid === undefined || sid === '') return true;
@@ -695,47 +697,6 @@ export class SwarmHubDO {
       });
       if (group.mode === 'prematch') {
         games = this.filterPrematchGames(games);
-      }
-
-      try {
-        await this.ensureHierarchyNameMaps();
-      } catch {
-        // ignore
-      }
-
-      const regionById = this.hierarchyRegionNameById;
-      const competitionById = this.hierarchyCompetitionNameById;
-      const sportById = this.hierarchySportNameById;
-      const maybeSportName = sportById[String(group.sportId)];
-      if (maybeSportName && (!group.sportName || group.sportName === group.sportId)) {
-        group.sportName = maybeSportName;
-      }
-
-      for (const g of games) {
-        if (!g || typeof g !== 'object') continue;
-        const go = g as any;
-
-        const regRaw = go?.region_id ?? go?.regionId ?? go?.region;
-        const regId = regRaw !== null && regRaw !== undefined && regRaw !== '' && (typeof regRaw === 'number' || typeof regRaw === 'string')
-          ? String(regRaw)
-          : null;
-        const regionName = (typeof regRaw === 'object' && regRaw && !Array.isArray(regRaw) && (regRaw as any).name)
-          ? String((regRaw as any).name)
-          : (regId ? (regionById[regId] || regId) : null);
-        if (regionName && (!go.region || typeof go.region !== 'string')) {
-          go.region = regionName;
-        }
-
-        const compRaw = go?.competition_id ?? go?.competitionId ?? go?.competition;
-        const compId = compRaw !== null && compRaw !== undefined && compRaw !== '' && (typeof compRaw === 'number' || typeof compRaw === 'string')
-          ? String(compRaw)
-          : null;
-        const competitionName = (typeof compRaw === 'object' && compRaw && !Array.isArray(compRaw) && (compRaw as any).name)
-          ? String((compRaw as any).name)
-          : (compId ? (competitionById[compId] || compId) : null);
-        if (competitionName && (!go.competition || typeof go.competition !== 'string')) {
-          go.competition = competitionName;
-        }
       }
 
       const nextIds: string[] = [];
