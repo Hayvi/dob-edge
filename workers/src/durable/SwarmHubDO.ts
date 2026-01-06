@@ -42,6 +42,7 @@ type SportStreamGroup = {
   clients: Map<string, Client>;
   timer: number | null;
   oddsTimer: number | null;
+  pollInFlight: boolean;
   lastFp: string;
   lastOddsFp: string;
   lastGamesPayload: unknown | null;
@@ -62,10 +63,10 @@ type GameStreamGroup = {
 
 const encoder = new TextEncoder();
 
- const ODDS_CHUNK_SIZE = 50;
- const ODDS_POLL_INTERVAL_MS = 750;
- const ODDS_SNAPSHOT_REBUILD_MS = 10000;
- const ODDS_REFRESH_AFTER_MS = 20000;
+ const ODDS_CHUNK_SIZE = 30;
+ const ODDS_POLL_INTERVAL_MS = 2500;
+ const ODDS_SNAPSHOT_REBUILD_MS = 15000;
+ const ODDS_REFRESH_AFTER_MS = 60000;
 
 function sseHeaders(): Headers {
   const headers = new Headers();
@@ -588,30 +589,37 @@ export class SwarmHubDO {
       return;
     }
 
+    if (group.pollInFlight) return;
+    group.pollInFlight = true;
+
     try {
       const gameFields =
         group.mode === 'live'
           ? ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'is_blocked', 'info', 'text_info', 'markets_count']
           : ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'is_blocked', 'visible_in_prematch', 'markets_count'];
 
-      const response = await this.sendRequest('get', {
-        source: 'betting',
-        what: {
-          sport: ['id', 'name'],
-          region: ['id', 'name'],
-          competition: ['id', 'name'],
-          game: gameFields
-        },
-        where:
-          group.mode === 'live'
-            ? { sport: { id: Number(group.sportId) }, game: { type: 1 } }
-            : {
-                sport: { id: Number(group.sportId) },
-                game: {
-                  '@or': [{ visible_in_prematch: 1 }, { type: { '@in': [0, 2] } }]
+      const response = await this.sendRequest(
+        'get',
+        {
+          source: 'betting',
+          what: {
+            sport: ['id', 'name'],
+            region: ['id', 'name'],
+            competition: ['id', 'name'],
+            game: gameFields
+          },
+          where:
+            group.mode === 'live'
+              ? { sport: { id: Number(group.sportId) }, game: { type: 1 } }
+              : {
+                  sport: { id: Number(group.sportId) },
+                  game: {
+                    '@or': [{ visible_in_prematch: 1 }, { type: { '@in': [0, 2] } }]
+                  }
                 }
-              }
-      });
+        },
+        15000
+      );
 
       if (response && typeof response === 'object') {
         const ro = response as Record<string, unknown>;
@@ -670,6 +678,8 @@ export class SwarmHubDO {
       await this.broadcast(group.clients, encodeSseEvent('games', payload));
     } catch (e) {
       await this.broadcast(group.clients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      group.pollInFlight = false;
     }
   }
 
@@ -816,6 +826,7 @@ export class SwarmHubDO {
         clients: new Map(),
         timer: null,
         oddsTimer: null,
+        pollInFlight: false,
         lastFp: '',
         lastOddsFp: '',
         lastGamesPayload: null,
@@ -836,6 +847,9 @@ export class SwarmHubDO {
     }
     if (!(group as any).oddsGameIds) {
       (group as any).oddsGameIds = [];
+    }
+    if (typeof (group as any).pollInFlight !== 'boolean') {
+      (group as any).pollInFlight = false;
     }
     if (typeof (group as any).oddsCursor !== 'number') {
       (group as any).oddsCursor = 0;

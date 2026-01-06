@@ -5,26 +5,12 @@ function renderSportsList() {
     return;
   }
 
-  let allowed = null;
-  if (currentMode === 'live') {
-    allowed = (sportsWithLiveGames instanceof Set ? sportsWithLiveGames : null);
-  } else if (currentMode === 'results') {
-    allowed = (sportsWithResults instanceof Set ? sportsWithResults : null);
-  } else {
-    allowed = (sportsWithPrematchGames instanceof Set ? sportsWithPrematchGames : null);
-  }
-
   const sports = Object.entries(hierarchy.sport).map(([id, sport]) => ({
     id: (sport && sport.id !== undefined && sport.id !== null && sport.id !== '') ? String(sport.id) : id,
     name: sport.name,
     alias: sport.alias,
     order: sport.order || 999
   }))
-    .filter(sport => {
-      if (currentSport && String(currentSport.id) === String(sport.id)) return true;
-      if (!allowed) return true;
-      return allowed.has(String(sport.name).toLowerCase());
-    })
     .sort((a, b) => a.order - b.order);
 
   document.getElementById('totalSports').textContent = sports.length;
@@ -40,7 +26,11 @@ function renderSportsList() {
 
   sportsList.innerHTML = sports.map(sport => {
     const isActive = Boolean(currentSport && String(currentSport.id) === String(sport.id));
-    const count = counts instanceof Map ? counts.get(String(sport.name).toLowerCase()) : null;
+    const key = String(sport.name).toLowerCase();
+    let count = counts instanceof Map ? counts.get(key) : null;
+    if ((currentMode === 'live' || currentMode === 'prematch') && counts instanceof Map) {
+      if (count === null || count === undefined) count = 0;
+    }
     const countDisplay = count === null || count === undefined ? '' : count;
     return `
     <div class="sport-item ${isActive ? 'active' : ''}" data-id="${sport.id}" data-name="${sport.name}">
@@ -61,16 +51,6 @@ function renderSportsList() {
       
       if (currentMode === 'results') {
         loadResultGames(item.dataset.id, item.dataset.name);
-      } else if (currentMode === 'prematch') {
-        // Use subscription-based stream for prematch (instant!)
-        currentSport = { id: item.dataset.id, name: item.dataset.name };
-        if (typeof startPrematchStream === 'function') {
-          startPrematchStream(item.dataset.id);
-        }
-        // Show loading state
-        welcomeScreen.classList.add('hidden');
-        gamesContainer.classList.remove('hidden');
-        document.getElementById('selectedSportName').textContent = item.dataset.name;
       } else {
         loadGames(item.dataset.id, item.dataset.name);
       }
