@@ -13,8 +13,6 @@ function renderSportsList() {
   }))
     .sort((a, b) => a.order - b.order);
 
-  document.getElementById('totalSports').textContent = sports.length;
-
   let counts;
   if (currentMode === 'live') {
     counts = sportsCountsLive;
@@ -24,13 +22,22 @@ function renderSportsList() {
     counts = sportsCountsPrematch;
   }
 
-  sportsList.innerHTML = sports.map(sport => {
+  const visibleSports = sports.filter(sport => {
+    const isActive = Boolean(currentSport && String(currentSport.id) === String(sport.id));
+    if (currentMode === 'results') return true;
+    if (!(counts instanceof Map)) return true;
+    const key = String(sport.name).toLowerCase();
+    const count = counts instanceof Map ? counts.get(key) : null;
+    const hasGames = typeof count === 'number' && count > 0;
+    return hasGames || isActive;
+  });
+
+  document.getElementById('totalSports').textContent = visibleSports.length;
+
+  sportsList.innerHTML = visibleSports.map(sport => {
     const isActive = Boolean(currentSport && String(currentSport.id) === String(sport.id));
     const key = String(sport.name).toLowerCase();
-    let count = counts instanceof Map ? counts.get(key) : null;
-    if ((currentMode === 'live' || currentMode === 'prematch') && counts instanceof Map) {
-      if (count === null || count === undefined) count = 0;
-    }
+    const count = counts instanceof Map ? counts.get(key) : null;
     const countDisplay = count === null || count === undefined ? '' : count;
     return `
     <div class="sport-item ${isActive ? 'active' : ''}" data-id="${sport.id}" data-name="${sport.name}">
