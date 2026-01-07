@@ -14,6 +14,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# local captures
+forzza-ws-capture-*.jsonl
+workers/forzza-ws-capture-*.jsonl
+
 # OS / editor
 .DS_Store
 .idea/
