@@ -53,7 +53,13 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown', sportId:
   const resolveCollection = (refs: any, map: AnyObj | null) => {
     if (!refs) return [];
     if (Array.isArray(refs)) {
-      return refs.map(id => (map ? map[String(id)] : null)).filter(Boolean);
+      return refs
+        .map((v) => {
+          if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+          if (map) return map[String(v)] || null;
+          return null;
+        })
+        .filter(Boolean);
     }
     if (typeof refs === 'object') {
       return Object.entries(refs)
@@ -64,8 +70,16 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown', sportId:
   };
 
   const targetSportId = sportId === null || sportId === undefined || sportId === '' ? null : String(sportId);
-  if (targetSportId && data && data.sport && data.sport[targetSportId]) {
-    const sport = data.sport[targetSportId];
+  if (targetSportId && data && data.sport) {
+    let sport: any = null;
+    if ((data as any).sport && typeof (data as any).sport === 'object' && !Array.isArray((data as any).sport)) {
+      sport = (data as any).sport[targetSportId] || (data as any).sport[String(Number(targetSportId))] || null;
+    } else if (Array.isArray((data as any).sport)) {
+      sport = ((data as any).sport as any[]).find((s) => s && String((s as any).id) === String(targetSportId)) || null;
+    }
+    if (!sport) {
+      // fall through
+    } else {
     const resolvedSportName = String(sport?.name || sportName);
 
     if (sport?.region) {
@@ -87,6 +101,26 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown', sportId:
           pushGame(game as AnyObj, resolvedSportName, (competition as any)?.name, resolvedSportName);
         }
       }
+    } else if (sport?.game) {
+      const games = resolveCollection(sport.game, data.game || null);
+      for (const game of games) {
+        let regionName = resolvedSportName;
+        const regionRef = (game as any)?.region ?? (game as any)?.region_id ?? (game as any)?.regionId;
+        if (regionRef !== null && regionRef !== undefined && regionRef !== '') {
+          const region = resolveFromMap(regionRef, null, (data as any)?.region || null) as AnyObj | null;
+          regionName = String(region?.name || regionRef);
+        }
+
+        let competitionName = 'Unknown';
+        const compRef = (game as any)?.competition ?? (game as any)?.competition_id ?? (game as any)?.competitionId;
+        if (compRef !== null && compRef !== undefined && compRef !== '') {
+          const comp = resolveFromMap(compRef, null, (data as any)?.competition || null) as AnyObj | null;
+          competitionName = String(comp?.name || compRef);
+        }
+
+        pushGame(game as AnyObj, regionName, competitionName, resolvedSportName);
+      }
+    }
     }
   }
 
@@ -130,6 +164,25 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown', sportId:
             pushGame(game as AnyObj, resolvedSportName, (competition as any)?.name, resolvedSportName);
           }
         }
+      } else if ((sport as any)?.game) {
+        const games = resolveCollection((sport as any).game, (data as any).game || null);
+        for (const game of games) {
+          let regionName = resolvedSportName;
+          const regionRef = (game as any)?.region ?? (game as any)?.region_id ?? (game as any)?.regionId;
+          if (regionRef !== null && regionRef !== undefined && regionRef !== '') {
+            const region = resolveFromMap(regionRef, null, (data as any)?.region || null) as AnyObj | null;
+            regionName = String(region?.name || regionRef);
+          }
+
+          let competitionName = 'Unknown';
+          const compRef = (game as any)?.competition ?? (game as any)?.competition_id ?? (game as any)?.competitionId;
+          if (compRef !== null && compRef !== undefined && compRef !== '') {
+            const comp = resolveFromMap(compRef, null, (data as any)?.competition || null) as AnyObj | null;
+            competitionName = String(comp?.name || compRef);
+          }
+
+          pushGame(game as AnyObj, regionName, competitionName, resolvedSportName);
+        }
       }
     }
   }
@@ -155,6 +208,29 @@ export function parseGamesFromData(rawData: any, sportName = 'Unknown', sportId:
 
       if (game.id === null || game.id === undefined || game.id === '') {
         game.id = k;
+      }
+
+      pushGame(game, regionName, competitionName);
+    }
+  }
+
+  if (allGames.length === 0 && data && Array.isArray((data as any).game)) {
+    for (const raw of (data as any).game) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const game = raw as AnyObj;
+
+      let regionName = 'Unknown';
+      const regionRef = (game as any)?.region ?? (game as any)?.region_id ?? (game as any)?.regionId;
+      if (regionRef !== null && regionRef !== undefined && regionRef !== '') {
+        const region = resolveFromMap(regionRef, null, (data as any)?.region || null) as AnyObj | null;
+        regionName = String(region?.name || regionRef);
+      }
+
+      let competitionName = 'Unknown';
+      const compRef = (game as any)?.competition ?? (game as any)?.competition_id ?? (game as any)?.competitionId;
+      if (compRef !== null && compRef !== undefined && compRef !== '') {
+        const comp = resolveFromMap(compRef, null, (data as any)?.competition || null) as AnyObj | null;
+        competitionName = String(comp?.name || compRef);
       }
 
       pushGame(game, regionName, competitionName);
