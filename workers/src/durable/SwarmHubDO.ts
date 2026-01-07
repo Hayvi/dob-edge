@@ -58,6 +58,8 @@ type SportStreamGroup = {
   oddsCursor: number;
   oddsGameIds: string[];
   oddsCache: Map<string, OddsCacheEntry>;
+  gamesSubid: string | null;
+  gamesSubscribing: boolean;
   oddsSubid: string | null;
   oddsSubscribing: boolean;
   oddsTypePriority: string[] | null;
@@ -643,6 +645,31 @@ export class SwarmHubDO {
     return new Response(readable, { status: 200, headers: sseHeaders() });
   }
 
+  private async handleLiveSportGamesEmit(group: SportStreamGroup, rawData: unknown): Promise<void> {
+    if (!group.clients || group.clients.size === 0) return;
+
+    const data = unwrapSwarmData(rawData);
+    let games = parseGamesFromData(data as any, group.sportName, group.sportId);
+    games = (Array.isArray(games) ? games : []).filter((g) => {
+      const sid = (g as any)?.sport_id;
+      if (sid === null || sid === undefined || sid === '') return true;
+      return String(sid) === String(group.sportId);
+    });
+
+    const fp = getSportFp(games);
+    if (fp && fp === group.lastFp && group.lastGamesPayload) return;
+    group.lastFp = fp;
+
+    const payload = {
+      sportId: group.sportId,
+      sportName: group.sportName,
+      data: games,
+      last_updated: new Date().toISOString()
+    };
+    group.lastGamesPayload = payload;
+    await this.broadcast(group.clients, encodeSseEvent('games', payload));
+  }
+
   private async ensureCompetitionOddsSubscription(group: CompetitionOddsGroup): Promise<void> {
     if (group.subid) return;
     await this.ensureConnection();
@@ -695,7 +722,20 @@ export class SwarmHubDO {
       this.embedMarketsIntoGame(g, data, String(gid));
     }
 
-    const typePriority = getSportMainMarketTypePriority(group.sportName);
+    const dynamicTypes = await this.getMarketTypePriority(group.sportId, group.sportName);
+    const fallbackTypes = getSportMainMarketTypePriority(group.sportName);
+    const merged: string[] = [];
+    for (const t of (Array.isArray(dynamicTypes) ? dynamicTypes : [])) {
+      const s = String(t || '');
+      if (!s) continue;
+      if (!merged.includes(s)) merged.push(s);
+    }
+    for (const t of (Array.isArray(fallbackTypes) ? fallbackTypes : [])) {
+      const s = String(t || '');
+      if (!s) continue;
+      if (!merged.includes(s)) merged.push(s);
+    }
+    const typePriority = merged.length ? merged : fallbackTypes;
     const updates: Array<{ gameId: unknown; odds: unknown; markets_count: number }> = [];
     const now = Date.now();
 
@@ -913,10 +953,23 @@ export class SwarmHubDO {
       clearTimeout(group.cleanupTimer);
       group.cleanupTimer = null;
     }
-    if (group.timer == null) {
-      group.timer = setInterval(() => {
-        void this.pollSportGroup(group);
-      }, 5000) as unknown as number;
+    if (group.mode === 'prematch') {
+      if (group.timer == null) {
+        group.timer = setInterval(() => {
+          void this.pollSportGroup(group);
+        }, 5000) as unknown as number;
+      }
+    } else {
+      if (!group.gamesSubid && !group.gamesSubscribing) {
+        setTimeout(() => {
+          void this.ensureLiveSportGamesSubscription(group);
+        }, 0);
+      }
+      if (group.timer == null && !group.gamesSubid) {
+        group.timer = setInterval(() => {
+          void this.pollSportGroup(group);
+        }, 5000) as unknown as number;
+      }
     }
 
     if (group.mode === 'prematch') {
@@ -942,6 +995,61 @@ export class SwarmHubDO {
     if (group.oddsTimer != null) {
       clearInterval(group.oddsTimer);
       group.oddsTimer = null;
+    }
+  }
+
+  private async ensureLiveSportGamesSubscription(group: SportStreamGroup): Promise<void> {
+    if (group.mode !== 'live') return;
+    if (group.gamesSubid) return;
+    if (group.gamesSubscribing) return;
+
+    group.gamesSubscribing = true;
+    try {
+      await this.ensureConnection();
+
+      const sportIdNum = Number(group.sportId);
+      const whereSportId = Number.isFinite(sportIdNum) ? sportIdNum : String(group.sportId);
+
+      const gameFields = ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'is_blocked', 'info', 'text_info', 'markets_count'];
+      if (!gameFields.includes('competition_id')) gameFields.push('competition_id');
+      if (!gameFields.includes('region_id')) gameFields.push('region_id');
+
+      const subid = await this.subscribeGet(
+        {
+          source: 'betting',
+          what: {
+            sport: ['id', 'name'],
+            region: ['id', 'name'],
+            competition: ['id', 'name'],
+            game: gameFields
+          },
+          where: {
+            sport: { id: whereSportId },
+            game: { type: 1 }
+          }
+        },
+        (data) => {
+          void this.handleLiveSportGamesEmit(group, data);
+        }
+      );
+
+      group.gamesSubid = String(subid);
+
+      if (group.timer != null) {
+        clearInterval(group.timer);
+        group.timer = null;
+      }
+    } catch (e) {
+      if (group.timer == null) {
+        group.timer = setInterval(() => {
+          void this.pollSportGroup(group);
+        }, 5000) as unknown as number;
+      }
+      setTimeout(() => {
+        void this.pollSportGroup(group);
+      }, 0);
+    } finally {
+      group.gamesSubscribing = false;
     }
   }
 
@@ -1003,6 +1111,8 @@ export class SwarmHubDO {
       this.stopSportGroup(group);
       return;
     }
+
+    if (group.mode === 'live' && group.gamesSubid) return;
 
     if (group.pollInFlight) return;
     group.pollInFlight = true;
@@ -1300,9 +1410,25 @@ export class SwarmHubDO {
         return Number.isFinite(n) ? n : s;
       });
 
-      const typePriority = getSportMainMarketTypePriority(group.sportName);
+      const dynamicTypes = group.oddsTypePriority && Array.isArray(group.oddsTypePriority) && group.oddsTypePriority.length
+        ? group.oddsTypePriority
+        : await this.getMarketTypePriority(group.sportId, group.sportName);
+      const fallbackTypes = getSportMainMarketTypePriority(group.sportName);
+      const merged: string[] = [];
+      for (const t of (Array.isArray(dynamicTypes) ? dynamicTypes : [])) {
+        const s = String(t || '');
+        if (!s) continue;
+        if (!merged.includes(s)) merged.push(s);
+      }
+      for (const t of (Array.isArray(fallbackTypes) ? fallbackTypes : [])) {
+        const s = String(t || '');
+        if (!s) continue;
+        if (!merged.includes(s)) merged.push(s);
+      }
+      const typePriority = merged.length ? merged : fallbackTypes;
+      group.oddsTypePriority = Array.isArray(typePriority) ? typePriority.slice(0, 20) : null;
       const where: any = { game: { id: { '@in': whereIds } } };
-      const pri = Array.isArray(typePriority) ? typePriority.map(String) : [];
+      const pri = Array.isArray(typePriority) ? typePriority.slice(0, 8).map(String) : [];
       if (pri.length) {
         where.market = { type: { '@in': pri } };
       }
@@ -1428,6 +1554,8 @@ export class SwarmHubDO {
         oddsCursor: 0,
         oddsGameIds: [],
         oddsCache: new Map(),
+        gamesSubid: null,
+        gamesSubscribing: false,
         oddsSubid: null,
         oddsSubscribing: false,
         oddsTypePriority: null
@@ -1442,6 +1570,12 @@ export class SwarmHubDO {
     }
     if (!(group as any).oddsGameIds) {
       (group as any).oddsGameIds = [];
+    }
+    if (typeof (group as any).gamesSubid !== 'string') {
+      (group as any).gamesSubid = null;
+    }
+    if (typeof (group as any).gamesSubscribing !== 'boolean') {
+      (group as any).gamesSubscribing = false;
     }
     if (typeof (group as any).oddsSubid !== 'string') {
       (group as any).oddsSubid = null;
@@ -1492,11 +1626,15 @@ export class SwarmHubDO {
           group.cleanupTimer = setTimeout(() => {
             if (group.clients.size === 0) {
               this.stopSportGroup(group);
+              const gamesSid = (group as any).gamesSubid;
+              (group as any).gamesSubid = null;
+              (group as any).gamesSubscribing = false;
               const oddsSid = (group as any).oddsSubid;
               (group as any).oddsSubid = null;
               (group as any).oddsSubscribing = false;
               (group as any).oddsTypePriority = null;
               groups.delete(key);
+              if (gamesSid) void this.unsubscribe(String(gamesSid));
               if (oddsSid) void this.unsubscribe(String(oddsSid));
               if (mode === 'live' && !this.hasActiveLiveSportClients() && this.countsClients.size === 0) {
                 void this.stopCountsSubscriptions();
