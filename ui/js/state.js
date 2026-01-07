@@ -43,6 +43,14 @@ function setMode(mode) {
   if (mode === 'cached') mode = 'prematch';
   currentMode = mode;
 
+  if (typeof stopLiveGameStream === 'function') {
+    stopLiveGameStream();
+  }
+  if (typeof clearGameDetails === 'function') {
+    clearGameDetails();
+  }
+  selectedGame = null;
+
   if (typeof stopAllCompetitionOddsStreams === 'function') {
     stopAllCompetitionOddsStreams();
   }

@@ -9,6 +9,14 @@ function filterPrematchGames(games) {
 }
 
 async function loadGames(sportId, sportName) {
+  if (typeof stopLiveGameStream === 'function') {
+    stopLiveGameStream();
+  }
+  if (typeof clearGameDetails === 'function') {
+    clearGameDetails();
+  }
+  selectedGame = null;
+
   showLoading(`Subscribing to ${sportName}...`);
   currentSport = { id: sportId, name: sportName };
 

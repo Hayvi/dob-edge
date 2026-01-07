@@ -20,6 +20,10 @@ function stopPrematchStream() {
   prematchStreamSource = null;
   prematchStreamSportId = null;
   prematchStreamHasOddsSse = false;
+
+  if (typeof stopLiveGameStream === 'function') {
+    stopLiveGameStream();
+  }
 }
 
 function startPrematchStream(sportId) {
