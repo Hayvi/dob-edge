@@ -1360,8 +1360,8 @@ export class SwarmHubDO {
           source: 'betting',
           what: {
             game: ['id', 'type', 'start_ts', 'team1_name', 'team2_name', 'info', 'text_info', 'markets_count'],
-            market: ['id', 'game_id', 'type', 'order', 'is_blocked', 'display_key'],
-            event: ['id', 'market_id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
+            market: ['id', 'game_id', 'type', 'order', 'is_blocked', 'display_key', 'display_sub_key', 'main_order', 'base', 'name', 'name_template', 'express_id'],
+            event: ['id', 'market_id', 'type', 'type_1', 'name', 'order', 'price', 'base', 'is_blocked']
           },
           where: { game: { id: whereId } }
         },

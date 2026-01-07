@@ -161,9 +161,29 @@ function showGameDetails(game) {
   const categorizeMarket = (m) => {
     const name = norm(m?.name);
     const type = norm(m?.type);
+    const dkey = norm(m?.display_key);
+    const dsub = norm(m?.display_sub_key);
 
     // Always add to All
     categories['All'].push(m);
+
+    // Prefer display_key-based categorization (matches Forzza)
+    if (dkey === 'winner' || dkey === '1x2' || dkey.includes('match_result')) {
+      categories['Match'].push(m);
+      return;
+    }
+    if (dkey === 'totals' || dkey === 'total') {
+      categories['Totals'].push(m);
+      return;
+    }
+    if (dkey === 'handicap') {
+      categories['Handicaps'].push(m);
+      return;
+    }
+    if (dsub.includes('half') || dsub.includes('period') || dsub.includes('quarter') || dsub.includes('set')) {
+      categories['Halves'].push(m);
+      // don't return; allow name/type fallbacks below to also include if relevant
+    }
 
     // Match - 1X2, DC, BTTS, DNB, Scores
     if (name.includes('1x2') || name.includes('winner') || name.includes('double chance') || name.includes('draw no bet') || name.includes('both teams to score') || name.includes('correct score') || name.includes('match result')) {
