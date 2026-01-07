@@ -89,6 +89,36 @@ async function main() {
     }
   }
 
+  // Best-effort attempt: expand a few competitions/regions on list pages (prematch/live).
+  // Many UIs use aria-expanded; click a few collapsed nodes to trigger lazy subscriptions.
+  try {
+    const expandLoc = page.locator('[aria-expanded="false"]');
+    const expandCount = await expandLoc.count();
+    const maxExpand = Math.min(expandCount, 12);
+    for (let i = 0; i < maxExpand; i++) {
+      try {
+        write({ ts: nowIso(), type: 'ui_click_attempt', text: 'expand_aria' });
+        await expandLoc.nth(i).click({ timeout: 2000 }).catch(() => null);
+        await page.waitForTimeout(1500);
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // Scroll to trigger any lazy loading.
+  for (let i = 0; i < 6; i++) {
+    try {
+      write({ ts: nowIso(), type: 'ui_scroll', step: `list:${i}` });
+      await page.evaluate(() => window.scrollBy(0, Math.floor(window.innerHeight * 0.9)));
+      await page.waitForTimeout(1500);
+    } catch {
+      // ignore
+    }
+  }
+
   try {
     const eventLinks = page.locator('a[href*="event-view"]');
     const linkCount = await eventLinks.count();
@@ -137,6 +167,20 @@ async function main() {
     }
   } catch {
     // ignore
+  }
+
+  // Try clicking a few odds-like buttons on any page to trigger selection/betslip flows.
+  for (let i = 0; i < 5; i++) {
+    try {
+      const oddsBtn = page.getByRole('button', { name: /\b\d+\.\d+\b/ }).first();
+      if (await oddsBtn.count()) {
+        write({ ts: nowIso(), type: 'ui_click_attempt', text: 'odds_button' });
+        await oddsBtn.click({ timeout: 2000 }).catch(() => null);
+        await page.waitForTimeout(1500);
+      }
+    } catch {
+      // ignore
+    }
   }
 
   await page.waitForTimeout(10000);
