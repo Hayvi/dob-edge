@@ -391,8 +391,13 @@ export class SwarmHubDO {
     }
 
     const initial = response.data as Record<string, unknown> | undefined;
-    const subid = initial?.subid;
-    if (!subid) throw new Error('subscribe did not return subid');
+    const subid =
+      (initial as any)?.subid ??
+      (response as any)?.subid ??
+      ((response as any)?.data && typeof (response as any).data === 'object' ? (response as any).data.subid : undefined);
+    if (subid === undefined || subid === null || (typeof subid === 'string' && subid.trim() === '')) {
+      throw new Error('subscribe did not return subid');
+    }
 
     const state = (initial as Record<string, unknown>) || {};
     this.subscriptions.set(String(subid), { state, onEmit });
@@ -1098,10 +1103,8 @@ export class SwarmHubDO {
       );
 
       group.oddsSubid = String(subid);
-    } catch (e) {
-      if (group.clients && group.clients.size) {
-        await this.broadcast(group.clients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
-      }
+    } catch {
+      return;
     } finally {
       group.oddsSubscribing = false;
     }
