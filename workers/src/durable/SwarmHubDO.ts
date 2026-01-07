@@ -867,6 +867,13 @@ export class SwarmHubDO {
         return Number.isFinite(n) ? n : s;
       });
 
+      const typePriority = getSportMainMarketTypePriority(group.sportName);
+      const where: any = { game: { id: { '@in': whereIds } } };
+      const pri = Array.isArray(typePriority) ? typePriority.map(String) : [];
+      if (pri.length) {
+        where.market = { type: { '@in': pri } };
+      }
+
       const response = await this.sendRequest(
         'get',
         {
@@ -876,7 +883,7 @@ export class SwarmHubDO {
             market: ['id', 'game_id', 'type', 'order', 'is_blocked', 'display_key'],
             event: ['id', 'market_id', 'type', 'name', 'order', 'price', 'base', 'is_blocked']
           },
-          where: { game: { id: { '@in': whereIds } } }
+          where
         },
         20000
       );
@@ -891,7 +898,6 @@ export class SwarmHubDO {
 
       const data = unwrapSwarmData(response) as any;
       const games = this.extractGamesFromNode(data?.game);
-      const typePriority = getSportMainMarketTypePriority(group.sportName);
       const updates: Array<{ gameId: unknown; odds: unknown; markets_count: number }> = [];
 
       for (const g of games) {

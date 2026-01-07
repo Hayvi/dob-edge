@@ -1,3 +1,65 @@
+const ODDS_CACHE_KEY_PREFIX = 'dob_sport_odds_cache_v1_';
+const ODDS_CACHE_TTL_MS = 10 * 60 * 1000;
+const ODDS_CACHE_MAX_ENTRIES = 250;
+
+function oddsCacheKey(mode, sportId) {
+  return `${ODDS_CACHE_KEY_PREFIX}${String(mode || '')}_${String(sportId || '')}`;
+}
+
+function readSportOddsCache(mode, sportId) {
+  try {
+    const key = oddsCacheKey(mode, sportId);
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const cachedAtMs = Number(parsed.cachedAtMs);
+    if (!Number.isFinite(cachedAtMs)) return null;
+    if (Date.now() - cachedAtMs > ODDS_CACHE_TTL_MS) return null;
+    const byGameId = parsed.byGameId;
+    if (!byGameId || typeof byGameId !== 'object') return null;
+    return byGameId;
+  } catch {
+    return null;
+  }
+}
+
+function writeSportOddsCache(mode, sportId, byGameId) {
+  try {
+    const key = oddsCacheKey(mode, sportId);
+    localStorage.setItem(key, JSON.stringify({ cachedAtMs: Date.now(), byGameId }));
+  } catch {
+    return;
+  }
+}
+
+function mergeOddsCache(mode, sportId, updates) {
+  if (!sportId) return;
+  const existing = readSportOddsCache(mode, sportId) || {};
+  const entries = Object.entries(existing);
+  entries.sort((a, b) => {
+    const au = Number(a?.[1]?.updatedAtMs) || 0;
+    const bu = Number(b?.[1]?.updatedAtMs) || 0;
+    return bu - au;
+  });
+  const next = {};
+  for (let i = 0; i < entries.length && i < ODDS_CACHE_MAX_ENTRIES; i++) {
+    next[entries[i][0]] = entries[i][1];
+  }
+
+  const now = Date.now();
+  for (const u of updates) {
+    const gid = u?.gameId;
+    if (!gid) continue;
+    const idStr = String(gid);
+    const odds = Array.isArray(u?.odds) ? u.odds : null;
+    const marketsCount = typeof u?.markets_count === 'number' ? u.markets_count : null;
+    next[idStr] = { odds, markets_count: marketsCount, updatedAtMs: now };
+  }
+
+  writeSportOddsCache(mode, sportId, next);
+}
+
 function applyLiveOddsPayload(payload) {
   if (!payload) return;
   if (!currentSport?.id) return;
@@ -8,6 +70,8 @@ function applyLiveOddsPayload(payload) {
 
   const selectedServerGameId = selectedGame ? getServerGameId(selectedGame) : null;
   const skipSelected = Boolean(selectedServerGameId && typeof isLiveGameStreamActive === 'function' && isLiveGameStreamActive());
+
+  mergeOddsCache(currentMode, currentSport.id, updates);
 
   for (const u of updates) {
     const gid = u?.gameId;
@@ -116,6 +180,23 @@ function applyLiveGamesPayload(payload) {
   currentGames.forEach((g, idx) => {
     g.__clientId = String(g.id ?? g.gameId ?? idx);
   });
+
+  const cachedOdds = readSportOddsCache(currentMode, currentSport.id);
+  if (cachedOdds) {
+    currentGames.forEach(g => {
+      const sid = getServerGameId(g);
+      if (!sid) return;
+      const entry = cachedOdds[String(sid)];
+      if (!entry) return;
+      if (!g.__mainOdds && Array.isArray(entry?.odds)) g.__mainOdds = entry.odds;
+      if (typeof entry?.markets_count === 'number' && typeof g.__mainMarketsCount !== 'number') {
+        g.__mainMarketsCount = entry.markets_count;
+      }
+      if (typeof entry?.updatedAtMs === 'number' && typeof g.__mainOddsUpdatedAt !== 'number') {
+        g.__mainOddsUpdatedAt = entry.updatedAtMs;
+      }
+    });
+  }
 
   currentGames.forEach(g => {
     const sid = getServerGameId(g);

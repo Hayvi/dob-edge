@@ -119,6 +119,23 @@ function applyPrematchGamesPayload(payload) {
     g.__clientId = String(g.id ?? g.gameId ?? idx);
   });
 
+  const cachedOdds = typeof readSportOddsCache === 'function' ? readSportOddsCache(currentMode, currentSport.id) : null;
+  if (cachedOdds) {
+    currentGames.forEach(g => {
+      const sid = getServerGameId(g);
+      if (!sid) return;
+      const entry = cachedOdds[String(sid)];
+      if (!entry) return;
+      if (!g.__mainOdds && Array.isArray(entry?.odds)) g.__mainOdds = entry.odds;
+      if (typeof entry?.markets_count === 'number' && typeof g.__mainMarketsCount !== 'number') {
+        g.__mainMarketsCount = entry.markets_count;
+      }
+      if (typeof entry?.updatedAtMs === 'number' && typeof g.__mainOddsUpdatedAt !== 'number') {
+        g.__mainOddsUpdatedAt = entry.updatedAtMs;
+      }
+    });
+  }
+
   // Carry over ephemeral state from previous games
   currentGames.forEach(g => {
     const sid = getServerGameId(g);
