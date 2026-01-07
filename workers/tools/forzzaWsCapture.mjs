@@ -96,6 +96,31 @@ async function main() {
       write({ ts: nowIso(), type: 'ui_click_attempt', text: 'event-view link' });
       await eventLinks.first().click({ timeout: 5000 }).catch(() => null);
       await page.waitForTimeout(15000);
+
+      const tabCandidates = ['All', 'Match', 'Totals', 'Handicaps', 'Halves', '1st Half', '2nd Half'];
+      for (const text of tabCandidates) {
+        try {
+          const loc = page.getByText(text, { exact: false });
+          const count = await loc.count();
+          if (count > 0) {
+            write({ ts: nowIso(), type: 'ui_click_attempt', text: `tab:${text}` });
+            await loc.first().click({ timeout: 2000 }).catch(() => null);
+            await page.waitForTimeout(2000);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      for (let i = 0; i < 8; i++) {
+        try {
+          write({ ts: nowIso(), type: 'ui_scroll', step: i });
+          await page.evaluate(() => window.scrollBy(0, Math.floor(window.innerHeight * 0.9)));
+          await page.waitForTimeout(1500);
+        } catch {
+          // ignore
+        }
+      }
     }
   } catch {
     // ignore
