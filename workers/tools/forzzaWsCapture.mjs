@@ -74,7 +74,7 @@ async function main() {
 
   // Best-effort attempt: click something that looks like a sport name.
   // This is intentionally defensive; if selectors don't match, it just skips.
-  const candidates = ['Football', 'Soccer', 'Live', 'Prematch'];
+  const candidates = ['Live', 'Prematch', 'Football', 'Soccer'];
   for (const text of candidates) {
     try {
       const loc = page.getByText(text, { exact: false });
@@ -83,7 +83,6 @@ async function main() {
         write({ ts: nowIso(), type: 'ui_click_attempt', text });
         await loc.first().click({ timeout: 2000 }).catch(() => null);
         await page.waitForTimeout(5000);
-        break;
       }
     } catch {
       // ignore
