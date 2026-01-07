@@ -3,6 +3,7 @@ import path from 'node:path';
 
 const url = process.argv[2] || 'https://sportsbook.forzza1x2.com/';
 const outPath = process.argv[3] || path.resolve(process.cwd(), `forzza-ws-capture-${Date.now()}.jsonl`);
+const maxPayloadChars = Number(process.env.FORZZA_CAPTURE_MAX_PAYLOAD_CHARS || 200000);
 
 function nowIso() {
   return new Date().toISOString();
@@ -43,11 +44,11 @@ async function main() {
     write({ ts: nowIso(), type: 'ws_open', id, wsUrl });
 
     ws.on('framesent', (frame) => {
-      write({ ts: nowIso(), type: 'ws_send', id, wsUrl, payload: clip(frame.payload) });
+      write({ ts: nowIso(), type: 'ws_send', id, wsUrl, payload: clip(frame.payload, maxPayloadChars) });
     });
 
     ws.on('framereceived', (frame) => {
-      write({ ts: nowIso(), type: 'ws_recv', id, wsUrl, payload: clip(frame.payload) });
+      write({ ts: nowIso(), type: 'ws_recv', id, wsUrl, payload: clip(frame.payload, maxPayloadChars) });
     });
 
     ws.on('close', () => {
@@ -117,6 +118,19 @@ async function main() {
           write({ ts: nowIso(), type: 'ui_scroll', step: i });
           await page.evaluate(() => window.scrollBy(0, Math.floor(window.innerHeight * 0.9)));
           await page.waitForTimeout(1500);
+        } catch {
+          // ignore
+        }
+      }
+
+      for (let i = 0; i < 5; i++) {
+        try {
+          const oddsBtn = page.getByRole('button', { name: /\b\d+\.\d+\b/ }).first();
+          if (await oddsBtn.count()) {
+            write({ ts: nowIso(), type: 'ui_click_attempt', text: 'odds_button' });
+            await oddsBtn.click({ timeout: 2000 }).catch(() => null);
+            await page.waitForTimeout(1500);
+          }
         } catch {
           // ignore
         }
