@@ -35,6 +35,11 @@ type SubscriptionEntry = {
   updatedAtMs: number;
  };
 
+ type MarketTypeCacheEntry = {
+  cachedAtMs: number;
+  types: string[];
+ };
+
 type SportStreamGroup = {
   sportId: string;
   mode: 'live' | 'prematch';
@@ -53,6 +58,9 @@ type SportStreamGroup = {
   oddsCursor: number;
   oddsGameIds: string[];
   oddsCache: Map<string, OddsCacheEntry>;
+  oddsSubid: string | null;
+  oddsSubscribing: boolean;
+  oddsTypePriority: string[] | null;
 };
 
 type GameStreamGroup = {
@@ -164,8 +172,11 @@ export class SwarmHubDO {
 
   private hierarchyMapsAtMs = 0;
   private hierarchySportNameById: Record<string, string> = {};
+  private hierarchySportAliasById: Record<string, string> = {};
   private hierarchyRegionNameById: Record<string, string> = {};
   private hierarchyCompetitionNameById: Record<string, string> = {};
+
+  private marketTypeCache: Map<string, MarketTypeCacheEntry> = new Map();
 
   private liveGroups: Map<string, SportStreamGroup> = new Map();
   private prematchGroups: Map<string, SportStreamGroup> = new Map();
@@ -391,6 +402,74 @@ export class SwarmHubDO {
       await this.sendRequest('unsubscribe', { subid: String(subid) }, 15000);
     } catch {
       return;
+    }
+  }
+
+  private async getSportAlias(sportId: string): Promise<string | null> {
+    await this.ensureHierarchyNameMaps();
+    const cached = this.hierarchySportAliasById[String(sportId)];
+    if (cached) return String(cached);
+
+    try {
+      const hierarchy = (await this.getHierarchy(false)) as any;
+      const h = hierarchy?.data || hierarchy;
+      const sports = h?.sport || {};
+      const s = sports[String(sportId)];
+      const alias = s?.alias;
+      if (alias) return String(alias);
+    } catch {
+      return null;
+    }
+
+    return null;
+  }
+
+  private async getMarketTypePriority(sportId: string, sportName: string): Promise<string[]> {
+    const ttlMs = 12 * 60 * 60 * 1000;
+    const key = String(sportId);
+    const cacheKey = `market_types:${key}`;
+    const fallback = getSportMainMarketTypePriority(String(sportName || ''));
+
+    const mem = this.marketTypeCache.get(key);
+    if (mem && typeof mem.cachedAtMs === 'number' && Date.now() - mem.cachedAtMs <= ttlMs && Array.isArray(mem.types) && mem.types.length) {
+      return mem.types.slice();
+    }
+
+    const stored = await this.state.storage.get<MarketTypeCacheEntry>(cacheKey);
+    if (stored && typeof stored.cachedAtMs === 'number' && Date.now() - stored.cachedAtMs <= ttlMs && Array.isArray(stored.types) && stored.types.length) {
+      this.marketTypeCache.set(key, stored);
+      return stored.types.slice();
+    }
+
+    const sportAlias = await this.getSportAlias(key);
+    if (!sportAlias) return Array.isArray(fallback) ? fallback.slice() : [];
+
+    try {
+      const response = (await this.sendRequest('get_market_type', { sport_alias: String(sportAlias) }, 20000)) as any;
+      if (response && typeof response === 'object' && response.code !== undefined && response.code !== 0) {
+        return Array.isArray(fallback) ? fallback.slice() : [];
+      }
+
+      const details = response?.data?.details;
+      const arr = Array.isArray(details) ? details.slice() : [];
+      arr.sort((a: any, b: any) => {
+        const ao = typeof a?.Order === 'number' ? Number(a.Order) : Number.MAX_SAFE_INTEGER;
+        const bo = typeof b?.Order === 'number' ? Number(b.Order) : Number.MAX_SAFE_INTEGER;
+        if (ao !== bo) return ao - bo;
+        return String(a?.BasaltKind ?? '').localeCompare(String(b?.BasaltKind ?? ''));
+      });
+
+      const types = arr
+        .map((d: any) => d?.BasaltKind)
+        .filter((v: any) => v !== null && v !== undefined && String(v) !== '')
+        .map((v: any) => String(v));
+
+      const entry: MarketTypeCacheEntry = { cachedAtMs: Date.now(), types: types.length ? types : (Array.isArray(fallback) ? fallback.slice() : []) };
+      this.marketTypeCache.set(key, entry);
+      await this.state.storage.put(cacheKey, entry);
+      return entry.types.slice();
+    } catch {
+      return Array.isArray(fallback) ? fallback.slice() : [];
     }
   }
 
@@ -800,6 +879,7 @@ export class SwarmHubDO {
     const competitions = h?.competition && typeof h.competition === 'object' ? h.competition : {};
 
     const sportById: Record<string, string> = {};
+    const sportAliasById: Record<string, string> = {};
     const regionById: Record<string, string> = {};
     const competitionById: Record<string, string> = {};
 
@@ -807,6 +887,8 @@ export class SwarmHubDO {
       if (!s || typeof s !== 'object') continue;
       const name = (s as any)?.name;
       if (name) sportById[String(id)] = String(name);
+      const alias = (s as any)?.alias;
+      if (alias) sportAliasById[String(id)] = String(alias);
     }
     for (const [id, r] of Object.entries(regions)) {
       if (!r || typeof r !== 'object') continue;
@@ -821,6 +903,7 @@ export class SwarmHubDO {
 
     this.hierarchyMapsAtMs = cached.cachedAtMs;
     this.hierarchySportNameById = sportById;
+    this.hierarchySportAliasById = sportAliasById;
     this.hierarchyRegionNameById = regionById;
     this.hierarchyCompetitionNameById = competitionById;
   }
@@ -835,10 +918,19 @@ export class SwarmHubDO {
         void this.pollSportGroup(group);
       }, 5000) as unknown as number;
     }
-    if (group.oddsTimer == null) {
-      group.oddsTimer = setInterval(() => {
-        void this.pollSportOddsGroup(group);
-      }, ODDS_POLL_INTERVAL_MS) as unknown as number;
+
+    if (group.mode === 'prematch') {
+      if (group.oddsTimer == null) {
+        group.oddsTimer = setInterval(() => {
+          void this.pollSportOddsGroup(group);
+        }, ODDS_POLL_INTERVAL_MS) as unknown as number;
+      }
+    } else {
+      if (!group.oddsSubid && !group.oddsSubscribing) {
+        setTimeout(() => {
+          void this.ensureLiveSportOddsSubscription(group);
+        }, 0);
+      }
     }
   }
 
@@ -850,6 +942,52 @@ export class SwarmHubDO {
     if (group.oddsTimer != null) {
       clearInterval(group.oddsTimer);
       group.oddsTimer = null;
+    }
+  }
+
+  private async ensureLiveSportOddsSubscription(group: SportStreamGroup): Promise<void> {
+    if (group.mode !== 'live') return;
+    if (group.oddsSubid) return;
+    if (group.oddsSubscribing) return;
+
+    group.oddsSubscribing = true;
+    try {
+      await this.ensureConnection();
+      const types = await this.getMarketTypePriority(group.sportId, group.sportName);
+      const typePriority = Array.isArray(types) && types.length ? types : getSportMainMarketTypePriority(group.sportName);
+      group.oddsTypePriority = Array.isArray(typePriority) ? typePriority.map(String) : [];
+      const mainType = group.oddsTypePriority.length ? group.oddsTypePriority[0] : null;
+      if (!mainType) return;
+
+      const sportIdNum = Number(group.sportId);
+      const whereSportId = Number.isFinite(sportIdNum) ? sportIdNum : String(group.sportId);
+
+      const subid = await this.subscribeGet(
+        {
+          source: 'betting',
+          what: {
+            game: ['id', 'markets_count'],
+            market: ['id', 'game_id', 'type', 'order', 'is_blocked', 'display_key', 'display_sub_key', 'main_order', 'base'],
+            event: ['id', 'market_id', 'type', 'type_1', 'name', 'order', 'price', 'base', 'is_blocked']
+          },
+          where: {
+            sport: { id: whereSportId },
+            game: { type: 1 },
+            market: { type: String(mainType) }
+          }
+        },
+        (data) => {
+          void this.handleLiveSportOddsEmit(group, data);
+        }
+      );
+
+      group.oddsSubid = String(subid);
+    } catch (e) {
+      if (group.clients && group.clients.size) {
+        await this.broadcast(group.clients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
+      }
+    } finally {
+      group.oddsSubscribing = false;
     }
   }
 
@@ -957,9 +1095,11 @@ export class SwarmHubDO {
       group.lastGamesPayload = payload;
       await this.broadcast(group.clients, encodeSseEvent('games', payload));
 
-      setTimeout(() => {
-        void this.pollSportOddsGroup(group);
-      }, 0);
+      if (group.mode === 'prematch') {
+        setTimeout(() => {
+          void this.pollSportOddsGroup(group);
+        }, 0);
+      }
     } catch (e) {
       await this.broadcast(group.clients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
@@ -1050,7 +1190,79 @@ export class SwarmHubDO {
     group.lastOddsSnapshotAtMs = now;
   }
 
+  private async handleLiveSportOddsEmit(group: SportStreamGroup, rawData: unknown): Promise<void> {
+    if (!group.clients || group.clients.size === 0) return;
+
+    const data = unwrapSwarmData(rawData) as any;
+    const games = this.extractGamesFromNode(data?.game);
+    if (!games.length) return;
+
+    for (const g of games) {
+      const gid = (g as any)?.id ?? (g as any)?.gameId;
+      if (gid === null || gid === undefined || gid === '') continue;
+      this.embedMarketsIntoGame(g, data, String(gid));
+    }
+
+    const typePriority = Array.isArray(group.oddsTypePriority) && group.oddsTypePriority.length
+      ? group.oddsTypePriority
+      : getSportMainMarketTypePriority(group.sportName);
+
+    const updates: Array<{ gameId: unknown; odds: unknown; markets_count: number }> = [];
+    const now = Date.now();
+
+    for (const g of games) {
+      const gid = (g as any)?.id ?? (g as any)?.gameId;
+      if (gid === null || gid === undefined || gid === '') continue;
+      const idStr = String(gid);
+
+      const marketMap = (g as any)?.market;
+      let market = pickPreferredMarketFromEmbedded(marketMap, typePriority);
+      if (!market && marketMap && typeof marketMap === 'object') {
+        const markets = Object.values(marketMap as Record<string, unknown>)
+          .map((mRaw) => (mRaw && typeof mRaw === 'object' && !Array.isArray(mRaw) ? (mRaw as any) : null))
+          .filter(Boolean) as any[];
+        markets.sort((a, b) => {
+          const ao = typeof a?.order === 'number' ? Number(a.order) : Number.MAX_SAFE_INTEGER;
+          const bo = typeof b?.order === 'number' ? Number(b.order) : Number.MAX_SAFE_INTEGER;
+          if (ao !== bo) return ao - bo;
+          return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+        });
+        const candidate = markets.find((m) => {
+          const ev = m?.event;
+          const cnt = ev && typeof ev === 'object' && !Array.isArray(ev) ? Object.keys(ev).length : 0;
+          return cnt === 2 || cnt === 3;
+        });
+        if (candidate) market = candidate;
+      }
+
+      const oddsArr = buildOddsArrFromMarket(market);
+      const marketsCount = typeof (g as any)?.markets_count === 'number'
+        ? Number((g as any).markets_count)
+        : (marketMap && typeof marketMap === 'object' ? Object.keys(marketMap).length : 0);
+      const fp = getOddsFp(market);
+
+      const prev = group.oddsCache.get(idStr);
+      const prevCount = typeof prev?.markets_count === 'number' ? Number(prev.markets_count) : null;
+      const shouldEmit = !prev || prev.fp !== fp || (typeof prevCount === 'number' && prevCount !== marketsCount);
+      if (!shouldEmit) {
+        group.oddsCache.set(idStr, { ...prev, updatedAtMs: now, markets_count: marketsCount });
+        continue;
+      }
+
+      group.oddsCache.set(idStr, { odds: oddsArr, markets_count: marketsCount, fp, updatedAtMs: now });
+      updates.push({ gameId: gid, odds: Array.isArray(oddsArr) ? oddsArr : null, markets_count: marketsCount });
+    }
+
+    if (updates.length) {
+      const payload = { sportId: group.sportId, updates };
+      await this.broadcast(group.clients, encodeSseEvent('odds', payload));
+    }
+
+    this.maybeRebuildOddsSnapshot(group);
+  }
+
   private async pollSportOddsGroup(group: SportStreamGroup): Promise<void> {
+    if (group.mode !== 'prematch') return;
     if (group.clients.size === 0) {
       this.stopSportGroup(group);
       return;
@@ -1215,7 +1427,10 @@ export class SwarmHubDO {
         oddsInFlight: false,
         oddsCursor: 0,
         oddsGameIds: [],
-        oddsCache: new Map()
+        oddsCache: new Map(),
+        oddsSubid: null,
+        oddsSubscribing: false,
+        oddsTypePriority: null
       };
       groups.set(key, group);
     } else if (!group.sportName && sportName) {
@@ -1227,6 +1442,15 @@ export class SwarmHubDO {
     }
     if (!(group as any).oddsGameIds) {
       (group as any).oddsGameIds = [];
+    }
+    if (typeof (group as any).oddsSubid !== 'string') {
+      (group as any).oddsSubid = null;
+    }
+    if (typeof (group as any).oddsSubscribing !== 'boolean') {
+      (group as any).oddsSubscribing = false;
+    }
+    if (!Array.isArray((group as any).oddsTypePriority)) {
+      (group as any).oddsTypePriority = null;
     }
     if (typeof (group as any).pollInFlight !== 'boolean') {
       (group as any).pollInFlight = false;
@@ -1268,7 +1492,12 @@ export class SwarmHubDO {
           group.cleanupTimer = setTimeout(() => {
             if (group.clients.size === 0) {
               this.stopSportGroup(group);
+              const oddsSid = (group as any).oddsSubid;
+              (group as any).oddsSubid = null;
+              (group as any).oddsSubscribing = false;
+              (group as any).oddsTypePriority = null;
               groups.delete(key);
+              if (oddsSid) void this.unsubscribe(String(oddsSid));
               if (mode === 'live' && !this.hasActiveLiveSportClients() && this.countsClients.size === 0) {
                 void this.stopCountsSubscriptions();
               }
