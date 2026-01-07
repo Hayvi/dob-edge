@@ -43,11 +43,11 @@ function renderDetailsMarketEventsHtml(market, ctx) {
 
       // Helper to check if event is Home or Away using TYPE field
       const isHomeType = (e) => {
-        const t = ctx.norm(e?.e?.type);
+        const t = ctx.norm(e?.e?.type_1 || e?.e?.type);
         return t === 'h1' || t === 'w1' || t === 'p1' || t === '1' || t === 'home' || t.includes('team1');
       };
       const isAwayType = (e) => {
-        const t = ctx.norm(e?.e?.type);
+        const t = ctx.norm(e?.e?.type_1 || e?.e?.type);
         return t === 'h2' || t === 'w2' || t === 'p2' || t === '2' || t === 'away' || t.includes('team2');
       };
 

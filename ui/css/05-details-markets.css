@@ -229,10 +229,31 @@
   align-items: start;
 }
 
+.market-group {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.market-group-title {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-secondary);
+  padding: 6px 2px;
+  text-transform: none;
+}
+
 @media (max-width: 600px) {
   .markets-list {
     grid-template-columns: 1fr;
     /* 1 Col on mobile */
+  }
+
+  .market-group {
+    grid-template-columns: 1fr;
   }
 }
 

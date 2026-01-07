@@ -42,6 +42,30 @@ function startLiveGameStream(gameId) {
     if (!serverGameId || String(payloadGameId) !== String(serverGameId)) return;
 
     const data = payload?.data || null;
+    if (data && typeof data === 'object' && selectedGame && typeof selectedGame === 'object') {
+      const fields = [
+        'type',
+        'start_ts',
+        'info',
+        'text_info',
+        'stats',
+        'is_blocked',
+        'is_stat_available',
+        'sportcast_id',
+        'match_length',
+        'last_event',
+        'live_events',
+        'add_info_name',
+        'is_neutral_venue',
+        'show_type',
+        'game_number'
+      ];
+      for (const k of fields) {
+        if (data[k] !== undefined) {
+          selectedGame[k] = data[k];
+        }
+      }
+    }
     const marketsMap = data?.market || null;
     if (marketsMap && typeof marketsMap === 'object') {
       selectedGame.market = marketsMap;

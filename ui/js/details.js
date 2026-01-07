@@ -126,12 +126,14 @@ function showGameDetails(game) {
   const isOver = (e) => {
     const n = norm(e?.name);
     const t = norm(e?.type);
-    return n === 'over' || n === 'o' || n.includes('over') || t.includes('over');
+    const t1 = norm(e?.type_1);
+    return n === 'over' || n === 'o' || n.includes('over') || t.includes('over') || t1.includes('over');
   };
   const isUnder = (e) => {
     const n = norm(e?.name);
     const t = norm(e?.type);
-    return n === 'under' || n === 'u' || n.includes('under') || t.includes('under');
+    const t1 = norm(e?.type_1);
+    return n === 'under' || n === 'u' || n.includes('under') || t.includes('under') || t1.includes('under');
   };
   const isOverUnderLineMarket = (market) => {
     if (!market) return false;
@@ -240,7 +242,7 @@ function showGameDetails(game) {
   const mergeMarkets = (marketList) => {
     const mergedMap = new Map();
     marketList.forEach(m => {
-      const key = String(m.name || '').trim();
+      const key = `${String(m?.group_id ?? m?.groupId ?? '')}:${String(m.name || '').trim()}`;
       if (!mergedMap.has(key)) {
         mergedMap.set(key, { ...m, event: { ...m.event } });
       } else {
@@ -298,7 +300,43 @@ function showGameDetails(game) {
     `;
   };
 
-  const marketsHtml = visibleMarkets.map(m => renderMarketSection(m)).join('');
+  const buildGroupedMarketsHtml = (markets) => {
+    const groupMap = new Map();
+    for (const m of markets) {
+      const gid = String(m?.group_id ?? m?.groupId ?? m?.group_name ?? m?.groupName ?? '');
+      const gname = String(m?.group_name ?? m?.groupName ?? 'Other');
+      const gorder = Number(m?.group_order ?? m?.groupOrder);
+      const key = gid ? `${gid}:${gname}` : gname;
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          key,
+          name: gname,
+          order: Number.isFinite(gorder) ? gorder : 9999,
+          markets: []
+        });
+      }
+      groupMap.get(key).markets.push(m);
+    }
+
+    const groups = Array.from(groupMap.values()).sort((a, b) => {
+      if (a.order !== b.order) return a.order - b.order;
+      return String(a.name).localeCompare(String(b.name));
+    });
+
+    return groups.map(g => {
+      const ms = Array.isArray(g.markets) ? g.markets.slice().sort(sortByOrderAsc) : [];
+      const inner = ms.map(m => renderMarketSection(m)).join('');
+      if (!inner) return '';
+      return `
+        <div class="market-group">
+          <div class="market-group-title">${g.name}</div>
+          ${inner}
+        </div>
+      `;
+    }).join('');
+  };
+
+  const marketsHtml = buildGroupedMarketsHtml(visibleMarkets);
 
   const liveTrackerHtml = isLive ? `
     <div class="live-tracker" id="liveTracker">

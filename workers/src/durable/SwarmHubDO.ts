@@ -60,6 +60,8 @@ type GameStreamGroup = {
   clients: Map<string, Client>;
   timer: number | null;
   pollInFlight: boolean;
+  subid: string | null;
+  subscribing: boolean;
   lastFp: string;
   lastPayload: unknown | null;
   cleanupTimer: number | null;
@@ -1330,16 +1332,152 @@ export class SwarmHubDO {
       clearTimeout(group.cleanupTimer);
       group.cleanupTimer = null;
     }
-    if (group.timer != null) return;
-    group.timer = setInterval(() => {
-      void this.pollGameGroup(group);
-    }, 5000) as unknown as number;
+    if (group.subid) return;
+    if (group.subscribing) return;
+    group.subscribing = true;
+    setTimeout(() => {
+      void (async () => {
+        try {
+          await this.ensureLiveGameSubscription(group);
+        } catch (e) {
+          await this.broadcast(group.clients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
+        } finally {
+          group.subscribing = false;
+        }
+      })();
+    }, 0);
   }
 
   private stopGameGroup(group: GameStreamGroup): void {
     if (group.timer == null) return;
     clearInterval(group.timer);
     group.timer = null;
+  }
+
+  private async ensureLiveGameSubscription(group: GameStreamGroup): Promise<void> {
+    if (group.subid) return;
+    await this.ensureConnection();
+
+    const gidNum = Number(group.gameId);
+    const whereId = Number.isFinite(gidNum) ? gidNum : String(group.gameId);
+
+    const subid = await this.subscribeGet(
+      {
+        source: 'betting',
+        what: {
+          game: [
+            'id',
+            'stats',
+            'info',
+            'is_neutral_venue',
+            'add_info_name',
+            'text_info',
+            'markets_count',
+            'type',
+            'start_ts',
+            'is_stat_available',
+            'team1_id',
+            'team1_name',
+            'team2_id',
+            'team2_name',
+            'last_event',
+            'live_events',
+            'match_length',
+            'sport_alias',
+            'sportcast_id',
+            'region_alias',
+            'is_blocked',
+            'show_type',
+            'game_number'
+          ],
+          market: [
+            'id',
+            'game_id',
+            'group_id',
+            'group_name',
+            'group_order',
+            'type',
+            'name_template',
+            'sequence',
+            'point_sequence',
+            'name',
+            'order',
+            'display_key',
+            'display_sub_key',
+            'col_count',
+            'express_id',
+            'extra_info',
+            'cashout',
+            'is_new',
+            'has_early_payout',
+            'prematch_express_id',
+            'main_order',
+            'base'
+          ],
+          event: [
+            'id',
+            'market_id',
+            'type_1',
+            'type',
+            'price',
+            'name',
+            'base',
+            'home_value',
+            'away_value',
+            'display_column',
+            'order',
+            'is_blocked'
+          ]
+        },
+        where: { game: { id: whereId } }
+      },
+      (data) => {
+        void this.handleLiveGameEmit(group, data);
+      }
+    );
+
+    group.subid = subid;
+  }
+
+  private async handleLiveGameEmit(group: GameStreamGroup, rawData: unknown): Promise<void> {
+    const data = unwrapSwarmData(rawData) as any;
+
+    let game: any = null;
+    const gamesNode = data?.game;
+    if (gamesNode && typeof gamesNode === 'object') {
+      if (Array.isArray(gamesNode)) {
+        game = gamesNode.find((g) => g && String((g as any).id) === String(group.gameId)) || null;
+      } else {
+        game = gamesNode[String(group.gameId)] ?? gamesNode[group.gameId] ?? null;
+        if (!game) {
+          const vals = Object.values(gamesNode as Record<string, unknown>);
+          if (vals.length === 1 && vals[0] && typeof vals[0] === 'object' && !Array.isArray(vals[0])) {
+            game = vals[0];
+          } else {
+            game = vals.find((g: any) => g && typeof g === 'object' && String(g.id) === String(group.gameId)) || null;
+          }
+        }
+      }
+    }
+    if (!game) {
+      const parsed = parseGamesFromData(data as any, 'Unknown', null);
+      if (Array.isArray(parsed) && parsed.length) {
+        game = parsed.find((g) => g && String((g as any)?.id ?? (g as any)?.gameId) === String(group.gameId)) || null;
+      }
+    }
+    if (!game) return;
+
+    this.embedMarketsIntoGame(game, data, group.gameId);
+
+    const fp = getGameFp(game) || (game ? getSportFp([game]) : '');
+    if (fp === group.lastFp && group.lastPayload) return;
+    group.lastFp = fp;
+
+    const payload = { gameId: group.gameId, data: game, last_updated: new Date().toISOString() };
+    group.lastPayload = payload;
+    if (group.clients.size) {
+      await this.broadcast(group.clients, encodeSseEvent('game', payload));
+    }
   }
 
   private async pollGameGroup(group: GameStreamGroup): Promise<void> {
@@ -1411,12 +1549,28 @@ export class SwarmHubDO {
     const key = String(gameId);
     let group = this.liveGameGroups.get(key);
     if (!group) {
-      group = { gameId: key, clients: new Map(), timer: null, pollInFlight: false, lastFp: '', lastPayload: null, cleanupTimer: null };
+      group = {
+        gameId: key,
+        clients: new Map(),
+        timer: null,
+        pollInFlight: false,
+        subid: null,
+        subscribing: false,
+        lastFp: '',
+        lastPayload: null,
+        cleanupTimer: null
+      };
       this.liveGameGroups.set(key, group);
     }
 
     if (typeof (group as any).pollInFlight !== 'boolean') {
       (group as any).pollInFlight = false;
+    }
+    if (typeof (group as any).subid !== 'string' && (group as any).subid !== null) {
+      (group as any).subid = null;
+    }
+    if (typeof (group as any).subscribing !== 'boolean') {
+      (group as any).subscribing = false;
     }
     if (typeof (group as any).cleanupTimer !== 'number' && (group as any).cleanupTimer !== null) {
       (group as any).cleanupTimer = null;
@@ -1452,7 +1606,13 @@ export class SwarmHubDO {
           group.cleanupTimer = setTimeout(() => {
             if (group.clients.size === 0) {
               this.stopGameGroup(group);
+              const sid = (group as any).subid;
+              (group as any).subid = null;
+              (group as any).subscribing = false;
+              group.lastPayload = null;
+              group.lastFp = '';
               this.liveGameGroups.delete(key);
+              if (sid) void this.unsubscribe(String(sid));
             }
           }, GROUP_GRACE_MS) as unknown as number;
         }
@@ -1475,9 +1635,6 @@ export class SwarmHubDO {
     }, 0);
 
     this.startGameGroup(group);
-    setTimeout(() => {
-      void this.pollGameGroup(group);
-    }, 0);
 
     return new Response(readable, { status: 200, headers: sseHeaders() });
   }
