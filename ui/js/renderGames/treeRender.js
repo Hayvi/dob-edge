@@ -136,9 +136,16 @@ function toggleCompetition(header) {
   if (container.classList.contains('expanded')) {
     ensureCompetitionVirtualized(container, virtualLastOptions);
     scheduleVirtualUpdate();
+    if (typeof maybeStartCompetitionOddsForContainer === 'function') {
+      maybeStartCompetitionOddsForContainer(container);
+    }
     const liveOddsSse = (typeof liveStreamHasOddsSse !== 'undefined') && Boolean(liveStreamHasOddsSse);
     const prematchOddsSse = (typeof prematchStreamHasOddsSse !== 'undefined') && Boolean(prematchStreamHasOddsSse);
     if (currentMode === 'live' && liveOddsSse) return;
     if (currentMode === 'prematch' && prematchOddsSse) return;
+  } else {
+    if (typeof maybeStopCompetitionOddsForContainer === 'function') {
+      maybeStopCompetitionOddsForContainer(container);
+    }
   }
 }

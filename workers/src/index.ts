@@ -100,7 +100,8 @@ export default {
       url.pathname === '/api/counts-stream' ||
       url.pathname === '/api/live-stream' ||
       url.pathname === '/api/prematch-stream' ||
-      url.pathname === '/api/live-game-stream'
+      url.pathname === '/api/live-game-stream' ||
+      url.pathname === '/api/competition-odds-stream'
     ) {
       const swarmId = env.SWARM_HUB.idFromName('global');
       const swarmStub = env.SWARM_HUB.get(swarmId);

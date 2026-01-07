@@ -65,6 +65,18 @@ type GameStreamGroup = {
   cleanupTimer: number | null;
 };
 
+type CompetitionOddsGroup = {
+  key: string;
+  sportId: string;
+  sportName: string;
+  mode: 'live' | 'prematch';
+  competitionId: string;
+  clients: Map<string, Client>;
+  subid: string | null;
+  cleanupTimer: number | null;
+  oddsCache: Map<string, OddsCacheEntry>;
+};
+
 const encoder = new TextEncoder();
 
  const ODDS_CHUNK_SIZE = 30;
@@ -156,6 +168,7 @@ export class SwarmHubDO {
   private liveGroups: Map<string, SportStreamGroup> = new Map();
   private prematchGroups: Map<string, SportStreamGroup> = new Map();
   private liveGameGroups: Map<string, GameStreamGroup> = new Map();
+  private competitionOddsGroups: Map<string, CompetitionOddsGroup> = new Map();
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -549,6 +562,209 @@ export class SwarmHubDO {
     return new Response(readable, { status: 200, headers: sseHeaders() });
   }
 
+  private async ensureCompetitionOddsSubscription(group: CompetitionOddsGroup): Promise<void> {
+    if (group.subid) return;
+    await this.ensureConnection();
+
+    const cidNum = Number(group.competitionId);
+    const whereCompetitionId = Number.isFinite(cidNum) ? cidNum : String(group.competitionId);
+
+    const whereGame =
+      group.mode === 'live'
+        ? { type: 1 }
+        : { '@or': [{ visible_in_prematch: 1 }, { type: { '@in': [0, 2] } }] };
+
+    const subid = await this.subscribeGet(
+      {
+        source: 'betting',
+        what: {
+          game: ['id', 'markets_count'],
+          market: ['id', 'game_id', 'type', 'order', 'is_blocked', 'display_key', 'display_sub_key', 'main_order', 'base'],
+          event: ['id', 'market_id', 'type', 'type_1', 'name', 'order', 'price', 'base', 'is_blocked']
+        },
+        where: {
+          competition: { id: whereCompetitionId },
+          game: whereGame,
+          market: {
+            '@or': [
+              { display_key: { '@in': ['HANDICAP', 'TOTALS'] }, display_sub_key: 'MATCH', main_order: 1 },
+              { display_key: 'WINNER', display_sub_key: 'MATCH' }
+            ]
+          }
+        }
+      },
+      (data) => {
+        void this.handleCompetitionOddsEmit(group, data);
+      }
+    );
+
+    group.subid = subid;
+  }
+
+  private async handleCompetitionOddsEmit(group: CompetitionOddsGroup, rawData: unknown): Promise<void> {
+    if (!group.clients || group.clients.size === 0) return;
+
+    const data = unwrapSwarmData(rawData) as any;
+    const games = this.extractGamesFromNode(data?.game);
+    if (!games.length) return;
+
+    for (const g of games) {
+      const gid = (g as any)?.id ?? (g as any)?.gameId;
+      if (gid === null || gid === undefined || gid === '') continue;
+      this.embedMarketsIntoGame(g, data, String(gid));
+    }
+
+    const typePriority = getSportMainMarketTypePriority(group.sportName);
+    const updates: Array<{ gameId: unknown; odds: unknown; markets_count: number }> = [];
+    const now = Date.now();
+
+    for (const g of games) {
+      const gid = (g as any)?.id ?? (g as any)?.gameId;
+      if (gid === null || gid === undefined || gid === '') continue;
+      const idStr = String(gid);
+
+      const marketMap = (g as any)?.market;
+      let market = pickPreferredMarketFromEmbedded(marketMap, typePriority);
+      if (!market && marketMap && typeof marketMap === 'object') {
+        const markets = Object.values(marketMap as Record<string, unknown>)
+          .map((mRaw) => (mRaw && typeof mRaw === 'object' && !Array.isArray(mRaw) ? (mRaw as any) : null))
+          .filter(Boolean) as any[];
+        markets.sort((a, b) => {
+          const ao = typeof a?.order === 'number' ? Number(a.order) : Number.MAX_SAFE_INTEGER;
+          const bo = typeof b?.order === 'number' ? Number(b.order) : Number.MAX_SAFE_INTEGER;
+          if (ao !== bo) return ao - bo;
+          return String(a?.id ?? '').localeCompare(String(b?.id ?? ''));
+        });
+        const candidate = markets.find((m) => {
+          const ev = m?.event;
+          const cnt = ev && typeof ev === 'object' && !Array.isArray(ev) ? Object.keys(ev).length : 0;
+          return cnt === 2 || cnt === 3;
+        });
+        if (candidate) market = candidate;
+      }
+
+      const oddsArr = buildOddsArrFromMarket(market);
+      const marketsCount = typeof (g as any)?.markets_count === 'number'
+        ? Number((g as any).markets_count)
+        : (marketMap && typeof marketMap === 'object' ? Object.keys(marketMap).length : 0);
+      const fp = getOddsFp(market);
+
+      const prev = group.oddsCache.get(idStr);
+      const prevCount = typeof prev?.markets_count === 'number' ? Number(prev.markets_count) : null;
+      const shouldEmit = !prev || prev.fp !== fp || (typeof prevCount === 'number' && prevCount !== marketsCount);
+      if (!shouldEmit) {
+        group.oddsCache.set(idStr, { ...prev, updatedAtMs: now, markets_count: marketsCount });
+        continue;
+      }
+
+      group.oddsCache.set(idStr, { odds: oddsArr, markets_count: marketsCount, fp, updatedAtMs: now });
+      updates.push({ gameId: gid, odds: Array.isArray(oddsArr) ? oddsArr : null, markets_count: marketsCount });
+    }
+
+    if (!updates.length) return;
+
+    const payload = { sportId: group.sportId, competitionId: group.competitionId, updates };
+    await this.broadcast(group.clients, encodeSseEvent('odds', payload));
+  }
+
+  private async handleCompetitionOddsStream(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const competitionId = url.searchParams.get('competitionId');
+    const sportId = url.searchParams.get('sportId');
+    const modeParam = url.searchParams.get('mode');
+
+    if (!competitionId) return json({ error: 'competitionId is required' }, { status: 400 });
+    if (!sportId) return json({ error: 'sportId is required' }, { status: 400 });
+    if (modeParam !== 'live' && modeParam !== 'prematch') return json({ error: 'mode must be live or prematch' }, { status: 400 });
+
+    const mode = modeParam as 'live' | 'prematch';
+    const sportNameParam = url.searchParams.get('sportName');
+    const sportName = sportNameParam ? String(sportNameParam) : await this.getSportName(sportId, null);
+
+    const key = `${mode}:${String(competitionId)}`;
+    let group = this.competitionOddsGroups.get(key);
+    if (!group) {
+      group = {
+        key,
+        sportId: String(sportId),
+        sportName,
+        mode,
+        competitionId: String(competitionId),
+        clients: new Map(),
+        subid: null,
+        cleanupTimer: null,
+        oddsCache: new Map()
+      };
+      this.competitionOddsGroups.set(key, group);
+    } else {
+      group.sportId = String(sportId);
+      if (sportName && !group.sportName) group.sportName = sportName;
+      if (group.cleanupTimer != null) {
+        clearTimeout(group.cleanupTimer);
+        group.cleanupTimer = null;
+      }
+    }
+
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = writable.getWriter();
+    const id = crypto.randomUUID();
+    const client: Client = { id, writer, abortSignal: request.signal };
+    group.clients.set(id, client);
+
+    request.signal.addEventListener('abort', () => {
+      const existing = group?.clients.get(id);
+      if (existing) {
+        try {
+          existing.writer.close();
+        } catch {
+          // ignore
+        }
+        group?.clients.delete(id);
+      }
+      if (group && group.clients.size === 0) {
+        if (group.cleanupTimer == null) {
+          group.cleanupTimer = setTimeout(() => {
+            if (group.clients.size === 0) {
+              const sid = group.subid;
+              group.subid = null;
+              group.oddsCache.clear();
+              this.competitionOddsGroups.delete(key);
+              if (sid) void this.unsubscribe(sid);
+            }
+          }, GROUP_GRACE_MS) as unknown as number;
+        }
+      }
+    });
+
+    setTimeout(() => {
+      void (async () => {
+        try {
+          await writer.write(encodeSseComment(' '.repeat(2048)));
+          await writer.write(encodeSseComment(`ready ${Date.now()}`));
+
+          if (group.oddsCache.size) {
+            const updates = Array.from(group.oddsCache.entries()).map(([gameId, v]) => ({
+              gameId,
+              odds: Array.isArray((v as any)?.odds) ? (v as any).odds : null,
+              markets_count: typeof (v as any)?.markets_count === 'number' ? Number((v as any).markets_count) : 0
+            }));
+            await writer.write(encodeSseEvent('odds', { sportId: group.sportId, competitionId: group.competitionId, updates }));
+          }
+        } catch {
+          // ignore
+        }
+      })();
+    }, 0);
+
+    setTimeout(() => {
+      void this.ensureCompetitionOddsSubscription(group!).catch((e) => {
+        void this.broadcast(group!.clients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
+      });
+    }, 0);
+
+    return new Response(readable, { status: 200, headers: sseHeaders() });
+  }
+
   private async getSportName(sportId: string, fallback: string | null): Promise<string> {
     if (fallback) return fallback;
     try {
@@ -656,6 +872,9 @@ export class SwarmHubDO {
         group.mode === 'live'
           ? ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'is_blocked', 'info', 'text_info', 'markets_count']
           : ['id', 'sport_id', 'type', 'start_ts', 'team1_name', 'team2_name', 'is_blocked', 'visible_in_prematch', 'markets_count'];
+
+      if (!gameFields.includes('competition_id')) gameFields.push('competition_id');
+      if (!gameFields.includes('region_id')) gameFields.push('region_id');
 
       const response = await this.sendRequest(
         'get',
@@ -1463,6 +1682,10 @@ export class SwarmHubDO {
 
     if (request.method === 'GET' && url.pathname === '/api/live-game-stream') {
       return this.handleLiveGameStream(request);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/competition-odds-stream') {
+      return this.handleCompetitionOddsStream(request);
     }
 
     if (request.method === 'GET' && url.pathname === '/api/results/competitions') {

@@ -12,6 +12,10 @@ async function loadGames(sportId, sportName) {
   showLoading(`Subscribing to ${sportName}...`);
   currentSport = { id: sportId, name: sportName };
 
+  if (typeof stopAllCompetitionOddsStreams === 'function') {
+    stopAllCompetitionOddsStreams();
+  }
+
   try {
     // Show the content shell immediately; actual games come from SSE.
     welcomeScreen.classList.add('hidden');

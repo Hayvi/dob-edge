@@ -34,6 +34,44 @@ function snapshotRegionsTreeState() {
   return { expandedRegions, expandedCompetitions };
 }
 
+function resolveCompetitionIdFromContainer(container) {
+  if (!container) return null;
+  const existing = container.dataset ? container.dataset.competitionId : null;
+  if (existing) return existing;
+  const vkey = container.dataset ? container.dataset.vkey : null;
+  if (!vkey) return null;
+  const games = typeof competitionGamesByKey !== 'undefined' && competitionGamesByKey ? competitionGamesByKey.get(String(vkey)) : null;
+  if (!Array.isArray(games) || games.length === 0) return null;
+  const g = games.find(x => x && (x.competition_id || x.competitionId || (x.competition && x.competition.id))) || games[0];
+  const cid = g ? (g.competition_id || g.competitionId || (g.competition && g.competition.id)) : null;
+  if (!cid) return null;
+  const idStr = String(cid);
+  if (container.dataset) container.dataset.competitionId = idStr;
+  return idStr;
+}
+
+function maybeStartCompetitionOddsForContainer(container) {
+  if (!container) return;
+  if (typeof startCompetitionOddsStream !== 'function') return;
+  if (!currentSport?.id) return;
+  const competitionId = resolveCompetitionIdFromContainer(container);
+  if (!competitionId) return;
+  startCompetitionOddsStream({
+    competitionId,
+    sportId: currentSport.id,
+    sportName: currentSport?.name || '',
+    mode: currentMode
+  });
+}
+
+function maybeStopCompetitionOddsForContainer(container) {
+  if (!container) return;
+  if (typeof stopCompetitionOddsStream !== 'function') return;
+  const competitionId = container.dataset ? container.dataset.competitionId : null;
+  if (!competitionId) return;
+  stopCompetitionOddsStream(competitionId, currentMode);
+}
+
 function restoreRegionsTreeState(state, options = {}) {
   const regionsTree = document.getElementById('regionsTree');
   if (!regionsTree || !state) return;
@@ -70,6 +108,7 @@ function restoreRegionsTreeState(state, options = {}) {
     if (container) {
       container.classList.add('expanded');
       ensureCompetitionVirtualized(container, options);
+      maybeStartCompetitionOddsForContainer(container);
       if (shouldHydrate && typeof hydrateMainMarketsInContainer === 'function') {
         hydrateMainMarketsInContainer(container);
       }
