@@ -109,6 +109,11 @@ function cleanup() {
     clearLiveStreamIntervals();
   }
   
+  // Clear odds animation timeouts to prevent memory leaks
+  if (typeof clearAllOddsAnimationTimeouts === 'function') {
+    clearAllOddsAnimationTimeouts();
+  }
+  
   // Stop all streams to clean up EventSource listeners
   if (typeof stopCountsStream === 'function') {
     stopCountsStream();

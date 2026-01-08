@@ -75,7 +75,13 @@ function setMode(mode) {
   // Clear current games view to indicate switch
   currentGames = [];
   const gamesListEl = document.getElementById('gamesList');
-  if (gamesListEl) gamesListEl.innerHTML = '';
+  if (gamesListEl) {
+    // Clear odds animation timeouts before clearing DOM
+    if (typeof clearOddsAnimationTimeoutsInContainer === 'function') {
+      clearOddsAnimationTimeoutsInContainer(gamesListEl);
+    }
+    gamesListEl.innerHTML = '';
+  }
   document.getElementById('gamesCount').textContent = '0 games';
 
   if (currentSport) {

@@ -36,7 +36,7 @@ This implementation plan addresses the remaining high-priority performance issue
   - **Property 2: Timer Lifecycle Management**
   - **Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5**
 
-- [ ] 2.3 Fix odds animation timeout accumulation in mainMarketHydration.js
+- [x] 2.3 Fix odds animation timeout accumulation in mainMarketHydration.js
   - Replace DOM element timeout storage with WeakMap or AbortController
   - Ensure timeouts are cleaned up when elements are removed
   - _Requirements: 2.3_

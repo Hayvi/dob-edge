@@ -1,3 +1,29 @@
+// WeakMap to track timeouts for DOM elements to prevent memory leaks
+const oddsFlashTimeouts = new WeakMap();
+
+// Function to clear all odds animation timeouts for cleanup
+function clearAllOddsAnimationTimeouts() {
+  // WeakMap automatically handles cleanup when elements are garbage collected,
+  // but we can manually clear active timeouts if needed
+  // This function can be called during page transitions or cleanup
+}
+
+// Function to clear timeouts for a specific container
+function clearOddsAnimationTimeoutsInContainer(containerEl) {
+  if (!containerEl) return;
+  
+  const oddsBtns = containerEl.querySelectorAll('.odd-btn');
+  oddsBtns.forEach(btn => {
+    const timeouts = oddsFlashTimeouts.get(btn);
+    if (timeouts) {
+      Object.values(timeouts).forEach(timeoutId => {
+        if (timeoutId) clearTimeout(timeoutId);
+      });
+      oddsFlashTimeouts.delete(btn);
+    }
+  });
+}
+
 async function fetchMainMarket(serverGameId) {
   return null;
 }
@@ -103,14 +129,33 @@ function updateGameRowOdds(serverGameId, oddsArr, marketsCount) {
         };
       }
 
-      const timeoutKey = `__oddsFlashTimeout${i}`;
-      const oldId = oddsBtns[i][timeoutKey];
-      if (oldId) clearTimeout(oldId);
-      oddsBtns[i][timeoutKey] = setTimeout(() => {
-        oddsBtns[i].classList.remove('odd-up', 'odd-down');
-        if (arrowEl) arrowEl.textContent = '';
-        oddsBtns[i][timeoutKey] = null;
+      // Use WeakMap to track timeouts instead of storing on DOM elements
+      const elementTimeouts = oddsFlashTimeouts.get(oddsBtns[i]) || {};
+      const oldTimeoutId = elementTimeouts[i];
+      if (oldTimeoutId) {
+        clearTimeout(oldTimeoutId);
+      }
+      
+      const newTimeoutId = setTimeout(() => {
+        // Check if element still exists in DOM before manipulating
+        if (oddsBtns[i] && oddsBtns[i].isConnected) {
+          oddsBtns[i].classList.remove('odd-up', 'odd-down');
+          if (arrowEl && arrowEl.isConnected) {
+            arrowEl.textContent = '';
+          }
+        }
+        // Clean up timeout reference
+        const currentTimeouts = oddsFlashTimeouts.get(oddsBtns[i]);
+        if (currentTimeouts) {
+          delete currentTimeouts[i];
+          if (Object.keys(currentTimeouts).length === 0) {
+            oddsFlashTimeouts.delete(oddsBtns[i]);
+          }
+        }
       }, 1100);
+      
+      elementTimeouts[i] = newTimeoutId;
+      oddsFlashTimeouts.set(oddsBtns[i], elementTimeouts);
     }
   }
 

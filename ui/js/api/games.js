@@ -40,6 +40,10 @@ async function loadGames(sportId, sportName) {
     document.getElementById('lastUpdated').textContent = '';
     const regionsTree = document.getElementById('regionsTree');
     if (regionsTree) {
+      // Clear odds animation timeouts before clearing DOM
+      if (typeof clearOddsAnimationTimeoutsInContainer === 'function') {
+        clearOddsAnimationTimeoutsInContainer(regionsTree);
+      }
       regionsTree.innerHTML = '<div class="loading">Loading games...</div>';
     }
 
