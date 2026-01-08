@@ -1,3 +1,5 @@
+let liveGameStreamListeners = []; // Track listeners for proper cleanup
+
 function isLiveGameStreamActive() {
   return Boolean(liveGameSource && liveGameSource.readyState !== 2);
 }
@@ -8,6 +10,11 @@ function stopLiveGameStream() {
     liveGameRetryTimeoutId = null;
   }
   if (liveGameSource) {
+    // Remove all listeners before closing to prevent memory leaks
+    for (const { type, listener } of liveGameStreamListeners) {
+      liveGameSource.removeEventListener(type, listener);
+    }
+    liveGameStreamListeners = [];
     liveGameSource.close();
   }
   liveGameSource = null;
@@ -31,7 +38,7 @@ function startLiveGameStream(gameId) {
   const es = new EventSource(apiUrl(`/api/live-game-stream${query}`));
   liveGameSource = es;
 
-  es.addEventListener('game', (evt) => {
+  const gameListener = (evt) => {
     // Allow updates for both live and prematch modes
     if (currentMode !== 'live' && currentMode !== 'prematch') return;
     if (!selectedGame) return;
@@ -84,9 +91,9 @@ function startLiveGameStream(gameId) {
     if (typeof showGameDetails === 'function') {
       showGameDetails(selectedGame);
     }
-  });
+  };
 
-  es.addEventListener('error', (evt) => {
+  const errorListener = (evt) => {
     if (!evt || typeof evt.data !== 'string' || !evt.data) return;
     const payload = safeJsonParse(evt.data);
     const msg = payload?.error ? String(payload.error) : '';
@@ -96,9 +103,9 @@ function startLiveGameStream(gameId) {
       liveGameLastToastAt = now;
       showToast(msg, 'error');
     }
-  });
+  };
 
-  es.onerror = () => {
+  const onerrorHandler = () => {
     // Stop if not in live or prematch mode
     if (currentMode !== 'live' && currentMode !== 'prematch') {
       stopLiveGameStream();
@@ -120,4 +127,14 @@ function startLiveGameStream(gameId) {
       if (currentMode === 'live' || currentMode === 'prematch') startLiveGameStream(gid);
     }, 5000);
   };
+
+  // Add listeners and track them for cleanup
+  es.addEventListener('game', gameListener);
+  liveGameStreamListeners.push({ type: 'game', listener: gameListener });
+
+  es.addEventListener('error', errorListener);
+  liveGameStreamListeners.push({ type: 'error', listener: errorListener });
+
+  // Note: onerror is a property, not an event listener, so it doesn't need tracking
+  es.onerror = onerrorHandler;
 }

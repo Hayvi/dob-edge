@@ -4,6 +4,7 @@ let prematchStreamSportId = null;
 let prematchStreamRetryTimeoutId = null;
 let prematchStreamLastToastAt = 0;
 let prematchStreamHasOddsSse = false;
+let prematchStreamListeners = []; // Track listeners for proper cleanup
 
 function isPrematchStreamActive() {
   return Boolean(prematchStreamSource && prematchStreamSource.readyState !== 2);
@@ -15,6 +16,11 @@ function stopPrematchStream() {
     prematchStreamRetryTimeoutId = null;
   }
   if (prematchStreamSource) {
+    // Remove all listeners before closing to prevent memory leaks
+    for (const { type, listener } of prematchStreamListeners) {
+      prematchStreamSource.removeEventListener(type, listener);
+    }
+    prematchStreamListeners = [];
     prematchStreamSource.close();
   }
   prematchStreamSource = null;
@@ -46,15 +52,15 @@ function startPrematchStream(sportId) {
   const es = new EventSource(apiUrl(`/api/prematch-stream${query}`));
   prematchStreamSource = es;
 
-  es.addEventListener('games', (evt) => {
+  const gamesListener = (evt) => {
     if (currentMode !== 'prematch') return;
     const payload = safeJsonParse(evt?.data);
     if (!payload) return;
     
     applyPrematchGamesPayload(payload);
-  });
+  };
 
-  es.addEventListener('odds', (evt) => {
+  const oddsListener = (evt) => {
     if (currentMode !== 'prematch') return;
     prematchStreamHasOddsSse = true;
     const payload = safeJsonParse(evt?.data);
@@ -62,9 +68,9 @@ function startPrematchStream(sportId) {
     if (typeof applyLiveOddsPayload === 'function') {
       applyLiveOddsPayload(payload);
     }
-  });
+  };
 
-  es.addEventListener('error', (evt) => {
+  const errorListener = (evt) => {
     if (!evt || typeof evt.data !== 'string' || !evt.data) return;
     const payload = safeJsonParse(evt.data);
     const msg = payload?.error ? String(payload.error) : '';
@@ -74,9 +80,9 @@ function startPrematchStream(sportId) {
       prematchStreamLastToastAt = now;
       showToast(msg, 'error');
     }
-  });
+  };
 
-  es.onerror = () => {
+  const onerrorHandler = () => {
     if (currentMode !== 'prematch') {
       stopPrematchStream();
       return;
@@ -97,6 +103,19 @@ function startPrematchStream(sportId) {
       if (currentMode === 'prematch') startPrematchStream(sid);
     }, 5000);
   };
+
+  // Add listeners and track them for cleanup
+  es.addEventListener('games', gamesListener);
+  prematchStreamListeners.push({ type: 'games', listener: gamesListener });
+
+  es.addEventListener('odds', oddsListener);
+  prematchStreamListeners.push({ type: 'odds', listener: oddsListener });
+
+  es.addEventListener('error', errorListener);
+  prematchStreamListeners.push({ type: 'error', listener: errorListener });
+
+  // Note: onerror is a property, not an event listener, so it doesn't need tracking
+  es.onerror = onerrorHandler;
 }
 
 function applyPrematchGamesPayload(payload) {
