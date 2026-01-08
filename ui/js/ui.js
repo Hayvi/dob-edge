@@ -6,7 +6,7 @@ function sortByOrderAsc(a, b) {
 }
 
 function formatOddValue(price) {
-  return typeof price === 'number' && Number.isFinite(price) ? price.toFixed(2) : '-';
+  return typeof price === 'number' && Number.isFinite(price) ? price.toFixed(3) : '-';
 }
 
 // UI Helpers
