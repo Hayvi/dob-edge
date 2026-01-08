@@ -12,7 +12,7 @@ This implementation plan addresses the remaining high-priority performance issue
   - Add proper listener removal before EventSource close
   - _Requirements: 1.1, 1.3, 1.5_
 
-- [ ] 1.2 Write property test for EventSource listener cleanup
+- [x] 1.2 Write property test for EventSource listener cleanup
   - **Property 1: EventSource Listener Cleanup Completeness**
   - **Validates: Requirements 1.1, 1.2, 1.3, 1.5**
 
