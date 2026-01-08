@@ -391,10 +391,9 @@ export class SwarmHubDO {
             console.error('Failed to close WebSocket on timeout:', error);
           }
           
-          // Reset connection state
+          // Reset connection state (but not this.connecting - that's handled in finally block)
           this.ws = null;
           this.sessionId = null;
-          this.connecting = null;
           
           reject(new Error('Swarm WebSocket connect timeout (30s)'));
         }, WS_CONNECTION_TIMEOUT_MS) as unknown as number; // 30 seconds as per Requirements 3.1
