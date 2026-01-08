@@ -103,6 +103,10 @@ const encoder = new TextEncoder();
  // Cache limits to prevent memory exhaustion
  const ODDS_CACHE_TTL_MS = 3600000; // 1 hour TTL
  const ODDS_CACHE_MAX_SIZE = 1000; // Max entries per cache
+ 
+ // Client limits to prevent DoS attacks
+ const MAX_CLIENTS_PER_DO = 10000; // Max concurrent clients per Durable Object
+ const MAX_CLIENTS_PER_GROUP = 1000; // Max clients per sport/game group
 
 function sseHeaders(): Headers {
   const headers = new Headers();
@@ -374,6 +378,50 @@ export class SwarmHubDO {
         cache.delete(entries[i][0]);
       }
     }
+  }
+
+  /**
+   * Count total clients across all groups to enforce DoS protection limits
+   */
+  private getTotalClientCount(): number {
+    let total = this.countsClients.size;
+    
+    for (const group of this.liveGroups.values()) {
+      total += group.clients.size;
+    }
+    
+    for (const group of this.prematchGroups.values()) {
+      total += group.clients.size;
+    }
+    
+    for (const group of this.liveGameGroups.values()) {
+      total += group.clients.size;
+    }
+    
+    for (const group of this.competitionOddsGroups.values()) {
+      total += group.clients.size;
+    }
+    
+    return total;
+  }
+
+  /**
+   * Check if adding a new client would exceed limits (DoS protection)
+   */
+  private canAddClient(groupClients?: Map<string, Client>): boolean {
+    const totalClients = this.getTotalClientCount();
+    
+    // Check global limit
+    if (totalClients >= MAX_CLIENTS_PER_DO) {
+      return false;
+    }
+    
+    // Check per-group limit if group specified
+    if (groupClients && groupClients.size >= MAX_CLIENTS_PER_GROUP) {
+      return false;
+    }
+    
+    return true;
   }
 
   private async ensureConnection(): Promise<void> {
@@ -792,6 +840,11 @@ export class SwarmHubDO {
   }
 
   private async handleCountsStream(request: Request): Promise<Response> {
+    // Check client limits to prevent DoS attacks
+    if (!this.canAddClient(this.countsClients)) {
+      return json({ error: 'Too many concurrent clients' }, { status: 429 });
+    }
+
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
     const id = crypto.randomUUID();
@@ -1039,6 +1092,11 @@ export class SwarmHubDO {
         clearTimeout(group.cleanupTimer);
         group.cleanupTimer = null;
       }
+    }
+
+    // Check client limits to prevent DoS attacks
+    if (!this.canAddClient(group.clients)) {
+      return json({ error: 'Too many concurrent clients' }, { status: 429 });
     }
 
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
@@ -2046,6 +2104,11 @@ export class SwarmHubDO {
       (group as any).lastOddsSnapshotAtMs = 0;
     }
 
+    // Check client limits to prevent DoS attacks
+    if (!this.canAddClient(group.clients)) {
+      return json({ error: 'Too many concurrent clients' }, { status: 429 });
+    }
+
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
     const id = crypto.randomUUID();
@@ -2412,6 +2475,11 @@ export class SwarmHubDO {
     }
     if (typeof (group as any).lastPayload === 'undefined') {
       (group as any).lastPayload = null;
+    }
+
+    // Check client limits to prevent DoS attacks
+    if (!this.canAddClient(group.clients)) {
+      return json({ error: 'Too many concurrent clients' }, { status: 429 });
     }
 
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
