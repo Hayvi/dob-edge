@@ -1,5 +1,17 @@
 let liveStreamListeners = []; // Track listeners for proper cleanup
 
+// Add global cleanup function for intervals
+function clearLiveStreamIntervals() {
+  if (liveStreamOddsIntervalId) {
+    clearInterval(liveStreamOddsIntervalId);
+    liveStreamOddsIntervalId = null;
+  }
+  if (liveStreamDetailsIntervalId) {
+    clearInterval(liveStreamDetailsIntervalId);
+    liveStreamDetailsIntervalId = null;
+  }
+}
+
 function isLiveStreamActive() {
   return Boolean(liveStreamSource && liveStreamSource.readyState !== 2);
 }
@@ -9,14 +21,10 @@ function stopLiveStream() {
     clearTimeout(liveStreamRetryTimeoutId);
     liveStreamRetryTimeoutId = null;
   }
-  if (liveStreamOddsIntervalId) {
-    clearInterval(liveStreamOddsIntervalId);
-    liveStreamOddsIntervalId = null;
-  }
-  if (liveStreamDetailsIntervalId) {
-    clearInterval(liveStreamDetailsIntervalId);
-    liveStreamDetailsIntervalId = null;
-  }
+  
+  // Clear intervals using the dedicated function
+  clearLiveStreamIntervals();
+  
   if (liveStreamSource) {
     // Remove all listeners before closing to prevent memory leaks
     for (const { type, listener } of liveStreamListeners) {
@@ -103,7 +111,7 @@ function startLiveStream(sportId) {
     }
 
     const sid = liveStreamSportId;
-    stopLiveStream();
+    stopLiveStream(); // This will clear intervals via clearLiveStreamIntervals()
     liveStreamSportId = sid;
 
     const now = Date.now();

@@ -26,13 +26,13 @@ This implementation plan addresses the remaining high-priority performance issue
   - Add prematchStream and liveGameStream cleanup calls
   - _Requirements: 1.4_
 
-- [ ] 2. Fix remaining timer leaks
-- [ ] 2.1 Fix liveStream interval cleanup on all code paths
+- [x] 2. Fix remaining timer leaks
+- [x] 2.1 Fix liveStream interval cleanup on all code paths
   - Ensure odds polling and details refresh intervals are cleared on mode changes
   - Add cleanup to all error paths and state transitions
   - _Requirements: 2.1, 2.2_
 
-- [ ] 2.2 Write property test for timer lifecycle management
+- [x] 2.2 Write property test for timer lifecycle management
   - **Property 2: Timer Lifecycle Management**
   - **Validates: Requirements 2.1, 2.2, 2.3, 2.4, 2.5**
 

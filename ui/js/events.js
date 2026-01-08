@@ -2,6 +2,11 @@ function setupEventListeners() {
   // Tab switching
   const onModeChanged = () => {
     (async () => {
+      // Clear live stream intervals when switching modes to prevent leaks
+      if (typeof clearLiveStreamIntervals === 'function') {
+        clearLiveStreamIntervals();
+      }
+      
       if (currentMode === 'results' && typeof ensureResultsSportsLoaded === 'function') {
         await ensureResultsSportsLoaded(true);
       }
@@ -97,6 +102,11 @@ function cleanup() {
   if (window.healthCheckIntervalId) {
     clearInterval(window.healthCheckIntervalId);
     window.healthCheckIntervalId = null;
+  }
+  
+  // Clear live stream intervals explicitly
+  if (typeof clearLiveStreamIntervals === 'function') {
+    clearLiveStreamIntervals();
   }
   
   // Stop all streams to clean up EventSource listeners
