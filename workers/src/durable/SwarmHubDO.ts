@@ -98,6 +98,10 @@ const encoder = new TextEncoder();
  const ODDS_SNAPSHOT_REBUILD_MS = 15000;
  const ODDS_REFRESH_AFTER_MS = 60000;
  const GROUP_GRACE_MS = 30000;
+ 
+ // Cache limits to prevent memory exhaustion
+ const ODDS_CACHE_TTL_MS = 3600000; // 1 hour TTL
+ const ODDS_CACHE_MAX_SIZE = 1000; // Max entries per cache
 
 function sseHeaders(): Headers {
   const headers = new Headers();
@@ -271,6 +275,32 @@ export class SwarmHubDO {
       clearTimeout(entry.timeoutId);
       entry.reject(err);
       this.pending.delete(rid);
+    }
+  }
+
+  /**
+   * Clean expired entries from odds cache to prevent memory exhaustion
+   * Uses TTL-based eviction with LRU fallback if cache exceeds max size
+   */
+  private cleanOddsCache(cache: Map<string, OddsCacheEntry>): void {
+    const now = Date.now();
+    
+    // First pass: Remove expired entries (TTL-based eviction)
+    for (const [key, entry] of cache.entries()) {
+      if (now - entry.updatedAtMs > ODDS_CACHE_TTL_MS) {
+        cache.delete(key);
+      }
+    }
+    
+    // Second pass: If still over limit, remove oldest entries (LRU eviction)
+    if (cache.size > ODDS_CACHE_MAX_SIZE) {
+      const entries = Array.from(cache.entries())
+        .sort(([, a], [, b]) => a.updatedAtMs - b.updatedAtMs); // Sort by age, oldest first
+      
+      const toRemove = cache.size - ODDS_CACHE_MAX_SIZE;
+      for (let i = 0; i < toRemove; i++) {
+        cache.delete(entries[i][0]);
+      }
     }
   }
 
@@ -811,6 +841,9 @@ export class SwarmHubDO {
 
     const payload = { sportId: group.sportId, competitionId: group.competitionId, updates };
     await this.broadcast(group.clients, encodeSseEvent('odds', payload));
+    
+    // Clean expired cache entries to prevent memory exhaustion
+    this.cleanOddsCache(group.oddsCache);
   }
 
   private async handleCompetitionOddsStream(request: Request): Promise<Response> {
