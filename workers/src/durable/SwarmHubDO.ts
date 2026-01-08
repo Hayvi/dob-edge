@@ -1287,6 +1287,9 @@ export class SwarmHubDO {
     }
 
     this.maybeRebuildOddsSnapshot(group);
+    
+    // Clean expired cache entries to prevent memory exhaustion
+    this.cleanOddsCache(group.oddsCache);
   }
 
   private hasActiveLiveSportClients(): boolean {
@@ -1559,6 +1562,9 @@ export class SwarmHubDO {
     }
 
     this.maybeRebuildOddsSnapshot(group);
+    
+    // Clean expired cache entries to prevent memory exhaustion
+    this.cleanOddsCache(group.oddsCache);
   }
 
   private async pollSportOddsGroup(group: SportStreamGroup): Promise<void> {
@@ -1705,6 +1711,9 @@ export class SwarmHubDO {
       }
 
       this.maybeRebuildOddsSnapshot(group);
+      
+      // Clean expired cache entries to prevent memory exhaustion
+      this.cleanOddsCache(group.oddsCache);
     } catch (e) {
       await this.broadcast(group.clients, encodeSseEvent('error', { error: e instanceof Error ? e.message : String(e) }));
     } finally {
