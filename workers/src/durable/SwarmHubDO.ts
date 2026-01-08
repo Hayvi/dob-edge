@@ -161,7 +161,11 @@ export class SwarmHubDO {
 
   private wsMessagesTotal = 0;
   private wsMessageParseErrorsTotal = 0;
-  private wsMessageTimestampsMs: number[] = [];
+  
+  // Circular buffer for message timestamps (replaces unbounded array)
+  private wsMessageTimestampsBuffer: number[] = new Array(2000).fill(0);
+  private wsMessageTimestampsIndex = 0;
+  private wsMessageTimestampsCount = 0;
 
   private subscriptions: Map<string, SubscriptionEntry> = new Map();
 
@@ -236,16 +240,30 @@ export class SwarmHubDO {
   private recordWsMessage(kind: 'ok' | 'parse_error'): void {
     const now = Date.now();
     this.wsMessagesTotal += 1;
-    this.wsMessageTimestampsMs.push(now);
-    if (this.wsMessageTimestampsMs.length > 2000) {
-      this.wsMessageTimestampsMs.splice(0, this.wsMessageTimestampsMs.length - 2000);
+    
+    // Add to circular buffer - O(1) operation instead of O(n) splice
+    this.wsMessageTimestampsBuffer[this.wsMessageTimestampsIndex] = now;
+    this.wsMessageTimestampsIndex = (this.wsMessageTimestampsIndex + 1) % 2000;
+    if (this.wsMessageTimestampsCount < 2000) {
+      this.wsMessageTimestampsCount++;
     }
+    
     if (kind === 'parse_error') this.wsMessageParseErrorsTotal += 1;
   }
 
   private getWsMessagesLast60s(): number {
     const now = Date.now();
-    return this.wsMessageTimestampsMs.filter(t => Number.isFinite(t) && now - t <= 60000).length;
+    let count = 0;
+    
+    // Efficiently count messages in last 60s using circular buffer
+    for (let i = 0; i < this.wsMessageTimestampsCount; i++) {
+      const timestamp = this.wsMessageTimestampsBuffer[i];
+      if (Number.isFinite(timestamp) && now - timestamp <= 60000) {
+        count++;
+      }
+    }
+    
+    return count;
   }
 
   private rejectAllPending(err: unknown): void {
