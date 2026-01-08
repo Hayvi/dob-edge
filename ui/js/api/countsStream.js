@@ -1,6 +1,7 @@
 // Counts stream - always active, streams live and prematch counts
 let countsStreamSource = null;
 let countsStreamRetryTimeoutId = null;
+let countsStreamListeners = []; // Track listeners for proper cleanup
 
 function isCountsStreamActive() {
   return Boolean(countsStreamSource && countsStreamSource.readyState !== 2);
@@ -12,6 +13,11 @@ function stopCountsStream() {
     countsStreamRetryTimeoutId = null;
   }
   if (countsStreamSource) {
+    // Remove all listeners before closing to prevent memory leaks
+    for (const { type, listener } of countsStreamListeners) {
+      countsStreamSource.removeEventListener(type, listener);
+    }
+    countsStreamListeners = [];
     countsStreamSource.close();
   }
   countsStreamSource = null;
@@ -25,7 +31,7 @@ function startCountsStream() {
   const es = new EventSource(apiUrl(`/api/counts-stream?_=${Date.now()}`));
   countsStreamSource = es;
   
-  es.addEventListener('live_counts', (evt) => {
+  const liveCountsListener = (evt) => {
     const payload = safeJsonParse(evt?.data);
     if (!payload) return;
     
@@ -56,9 +62,9 @@ function startCountsStream() {
       const q = document.getElementById('sportSearch')?.value || '';
       if (q) filterSports(q);
     }
-  });
+  };
   
-  es.addEventListener('prematch_counts', (evt) => {
+  const prematchCountsListener = (evt) => {
     const payload = safeJsonParse(evt?.data);
     if (!payload) return;
     
@@ -89,9 +95,9 @@ function startCountsStream() {
       const q = document.getElementById('sportSearch')?.value || '';
       if (q) filterSports(q);
     }
-  });
-  
-  es.onerror = () => {
+  };
+
+  const errorListener = () => {
     stopCountsStream();
     
     // Retry after 5 seconds
@@ -100,4 +106,14 @@ function startCountsStream() {
       startCountsStream();
     }, 5000);
   };
+  
+  // Add listeners and track them for cleanup
+  es.addEventListener('live_counts', liveCountsListener);
+  countsStreamListeners.push({ type: 'live_counts', listener: liveCountsListener });
+  
+  es.addEventListener('prematch_counts', prematchCountsListener);
+  countsStreamListeners.push({ type: 'prematch_counts', listener: prematchCountsListener });
+  
+  es.addEventListener('error', errorListener);
+  countsStreamListeners.push({ type: 'error', listener: errorListener });
 }

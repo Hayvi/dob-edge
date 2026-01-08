@@ -78,7 +78,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Keep-alive: refresh health every 10 minutes
-  setInterval(() => {
+  // Store interval ID for cleanup to prevent memory leaks
+  if (window.healthCheckIntervalId) {
+    clearInterval(window.healthCheckIntervalId);
+  }
+  window.healthCheckIntervalId = setInterval(() => {
     loadHealth();
     console.log('Keep-alive health check');
   }, 10 * 60 * 1000);
@@ -88,3 +92,28 @@ document.addEventListener('DOMContentLoaded', () => {
 healthModal.addEventListener('click', (e) => {
   if (e.target === healthModal) closeHealthModal();
 });
+// Cleanup function to prevent memory leaks
+function cleanup() {
+  if (window.healthCheckIntervalId) {
+    clearInterval(window.healthCheckIntervalId);
+    window.healthCheckIntervalId = null;
+  }
+  
+  // Stop all streams to clean up EventSource listeners
+  if (typeof stopCountsStream === 'function') {
+    stopCountsStream();
+  }
+  if (typeof stopLiveStream === 'function') {
+    stopLiveStream();
+  }
+  if (typeof stopPrematchStream === 'function') {
+    stopPrematchStream();
+  }
+  if (typeof stopLiveGameStream === 'function') {
+    stopLiveGameStream();
+  }
+}
+
+// Clean up on page unload to prevent memory leaks
+window.addEventListener('beforeunload', cleanup);
+window.addEventListener('unload', cleanup);

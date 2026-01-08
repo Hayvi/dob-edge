@@ -1,3 +1,5 @@
+let liveStreamListeners = []; // Track listeners for proper cleanup
+
 function isLiveStreamActive() {
   return Boolean(liveStreamSource && liveStreamSource.readyState !== 2);
 }
@@ -16,6 +18,11 @@ function stopLiveStream() {
     liveStreamDetailsIntervalId = null;
   }
   if (liveStreamSource) {
+    // Remove all listeners before closing to prevent memory leaks
+    for (const { type, listener } of liveStreamListeners) {
+      liveStreamSource.removeEventListener(type, listener);
+    }
+    liveStreamListeners = [];
     liveStreamSource.close();
   }
   liveStreamSource = null;
@@ -44,27 +51,27 @@ function startLiveStream(sportId) {
   const es = new EventSource(apiUrl(`/api/live-stream${query}`));
   liveStreamSource = es;
 
-  es.addEventListener('counts', (evt) => {
+  const countsListener = (evt) => {
     if (currentMode !== 'live') return;
     const payload = safeJsonParse(evt?.data);
     if (!payload) return;
     applyLiveCountsPayload(payload);
-  });
+  };
 
-  es.addEventListener('prematch_counts', (evt) => {
+  const prematchCountsListener = (evt) => {
     const payload = safeJsonParse(evt?.data);
     if (!payload) return;
     applyPrematchCountsPayload(payload);
-  });
+  };
 
-  es.addEventListener('games', (evt) => {
+  const gamesListener = (evt) => {
     if (currentMode !== 'live') return;
     const payload = safeJsonParse(evt?.data);
     if (!payload) return;
     applyLiveGamesPayload(payload);
-  });
+  };
 
-  es.addEventListener('odds', (evt) => {
+  const oddsListener = (evt) => {
     if (currentMode !== 'live') return;
     liveStreamHasOddsSse = true;
     if (liveStreamOddsIntervalId) {
@@ -75,9 +82,9 @@ function startLiveStream(sportId) {
     const payload = safeJsonParse(evt?.data);
     if (!payload) return;
     applyLiveOddsPayload(payload);
-  });
+  };
 
-  es.addEventListener('error', (evt) => {
+  const errorListener = (evt) => {
     if (!evt || typeof evt.data !== 'string' || !evt.data) return;
     const payload = safeJsonParse(evt.data);
     const msg = payload?.error ? String(payload.error) : '';
@@ -87,9 +94,9 @@ function startLiveStream(sportId) {
       liveStreamLastToastAt = now;
       showToast(msg, 'error');
     }
-  });
+  };
 
-  es.onerror = () => {
+  const onerrorHandler = () => {
     if (currentMode !== 'live') {
       stopLiveStream();
       return;
@@ -110,6 +117,25 @@ function startLiveStream(sportId) {
       if (currentMode === 'live') startLiveStream(sid);
     }, 5000);
   };
+
+  // Add listeners and track them for cleanup
+  es.addEventListener('counts', countsListener);
+  liveStreamListeners.push({ type: 'counts', listener: countsListener });
+
+  es.addEventListener('prematch_counts', prematchCountsListener);
+  liveStreamListeners.push({ type: 'prematch_counts', listener: prematchCountsListener });
+
+  es.addEventListener('games', gamesListener);
+  liveStreamListeners.push({ type: 'games', listener: gamesListener });
+
+  es.addEventListener('odds', oddsListener);
+  liveStreamListeners.push({ type: 'odds', listener: oddsListener });
+
+  es.addEventListener('error', errorListener);
+  liveStreamListeners.push({ type: 'error', listener: errorListener });
+
+  // Note: onerror is a property, not an event listener, so it doesn't need tracking
+  es.onerror = onerrorHandler;
 
   liveStreamOddsIntervalId = setInterval(() => {
     if (currentMode !== 'live' || !isLiveStreamActive()) return;

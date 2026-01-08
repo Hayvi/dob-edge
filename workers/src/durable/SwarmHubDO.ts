@@ -103,6 +103,11 @@ const encoder = new TextEncoder();
  const ODDS_CACHE_TTL_MS = 3600000; // 1 hour TTL
  const ODDS_CACHE_MAX_SIZE = 1000; // Max entries per cache
 
+ // Client limits to prevent DoS attacks and resource exhaustion
+ const MAX_CLIENTS_PER_DO = 10000; // Maximum concurrent clients per Durable Object
+ const MAX_SUBSCRIPTIONS = 1000; // Maximum concurrent subscriptions
+ const MAX_PENDING_REQUESTS = 100; // Maximum concurrent pending requests
+
 function sseHeaders(): Headers {
   const headers = new Headers();
   headers.set('Content-Type', 'text/event-stream');
@@ -408,6 +413,11 @@ export class SwarmHubDO {
       throw new Error('Swarm WebSocket not connected');
     }
 
+    // Check pending request limit to prevent resource exhaustion
+    if (this.pending.size >= MAX_PENDING_REQUESTS) {
+      throw new Error('Too many concurrent pending requests');
+    }
+
     const rid = crypto.randomUUID();
     const request = { command, params, rid };
 
@@ -432,6 +442,11 @@ export class SwarmHubDO {
   }
 
   private async subscribeGet(params: Record<string, unknown>, onEmit: (data: unknown) => void): Promise<string> {
+    // Check subscription limit to prevent resource exhaustion
+    if (this.subscriptions.size >= MAX_SUBSCRIPTIONS) {
+      throw new Error('Too many concurrent subscriptions');
+    }
+
     const response = (await this.sendRequest('get', { ...params, subscribe: true })) as Record<string, unknown>;
     if (response?.code !== undefined && response.code !== 0) {
       const msg = response?.msg ? `: ${String(response.msg)}` : '';
@@ -645,6 +660,11 @@ export class SwarmHubDO {
   }
 
   private async handleCountsStream(request: Request): Promise<Response> {
+    // Check client limit to prevent DoS attacks
+    if (this.countsClients.size >= MAX_CLIENTS_PER_DO) {
+      return new Response('Too many concurrent clients', { status: 429 });
+    }
+
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
     const id = crypto.randomUUID();
@@ -848,6 +868,17 @@ export class SwarmHubDO {
 
   private async handleCompetitionOddsStream(request: Request): Promise<Response> {
     const url = new URL(request.url);
+
+    // Check total client limit across all groups to prevent DoS attacks
+    const totalClients = this.countsClients.size + 
+      Array.from(this.liveGroups.values()).reduce((sum, g) => sum + g.clients.size, 0) +
+      Array.from(this.prematchGroups.values()).reduce((sum, g) => sum + g.clients.size, 0) +
+      Array.from(this.liveGameGroups.values()).reduce((sum, g) => sum + g.clients.size, 0) +
+      Array.from(this.competitionOddsGroups.values()).reduce((sum, g) => sum + g.clients.size, 0);
+    
+    if (totalClients >= MAX_CLIENTS_PER_DO) {
+      return new Response('Too many concurrent clients', { status: 429 });
+    }
     const competitionId = url.searchParams.get('competitionId');
     const sportId = url.searchParams.get('sportId');
     const modeParam = url.searchParams.get('mode');
@@ -1728,6 +1759,17 @@ export class SwarmHubDO {
       return json({ error: 'sportId is required' }, { status: 400 });
     }
 
+    // Check total client limit across all groups to prevent DoS attacks
+    const totalClients = this.countsClients.size + 
+      Array.from(this.liveGroups.values()).reduce((sum, g) => sum + g.clients.size, 0) +
+      Array.from(this.prematchGroups.values()).reduce((sum, g) => sum + g.clients.size, 0) +
+      Array.from(this.liveGameGroups.values()).reduce((sum, g) => sum + g.clients.size, 0) +
+      Array.from(this.competitionOddsGroups.values()).reduce((sum, g) => sum + g.clients.size, 0);
+    
+    if (totalClients >= MAX_CLIENTS_PER_DO) {
+      return new Response('Too many concurrent clients', { status: 429 });
+    }
+
     const sportNameParam = url.searchParams.get('sportName');
     const sportName = await this.getSportName(sportId, sportNameParam);
 
@@ -2123,6 +2165,17 @@ export class SwarmHubDO {
     const url = new URL(request.url);
     const gameId = url.searchParams.get('gameId');
     if (!gameId) return json({ error: 'gameId is required' }, { status: 400 });
+
+    // Check total client limit across all groups to prevent DoS attacks
+    const totalClients = this.countsClients.size + 
+      Array.from(this.liveGroups.values()).reduce((sum, g) => sum + g.clients.size, 0) +
+      Array.from(this.prematchGroups.values()).reduce((sum, g) => sum + g.clients.size, 0) +
+      Array.from(this.liveGameGroups.values()).reduce((sum, g) => sum + g.clients.size, 0) +
+      Array.from(this.competitionOddsGroups.values()).reduce((sum, g) => sum + g.clients.size, 0);
+    
+    if (totalClients >= MAX_CLIENTS_PER_DO) {
+      return new Response('Too many concurrent clients', { status: 429 });
+    }
 
     const key = String(gameId);
     let group = this.liveGameGroups.get(key);
