@@ -14,6 +14,12 @@ const API_BASE = (() => {
   if (host && host.includes('dob-edge') && host.endsWith('.pages.dev')) {
     return 'https://dob-edge.ghzwael.workers.dev';
   }
+  
+  // For local development, use the local worker
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return 'http://localhost:8787';
+  }
+  
   return '';
 })();
 

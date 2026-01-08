@@ -16,7 +16,12 @@ export function extractSportsCountsFromSwarm(rawData: unknown): { sports: Array<
   if (data && data.sport && typeof data.sport === 'object') {
     for (const s of Object.values<any>(data.sport)) {
       const name = s?.name;
-      const count = s?.game ? Object.keys(s.game).length : 0;
+      let count = 0;
+      if (typeof s?.game === 'number') {
+        count = Number(s.game) || 0;
+      } else if (s?.game && typeof s.game === 'object') {
+        count = Object.keys(s.game).length;
+      }
       if (name && count > 0) {
         sports.push({ name: String(name), count: Number(count) || 0 });
       }

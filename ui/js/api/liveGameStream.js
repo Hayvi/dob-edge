@@ -38,6 +38,7 @@ function startLiveGameStream(gameId) {
   const es = new EventSource(apiUrl(`/api/live-game-stream${query}`));
   liveGameSource = es;
 
+  // Track listeners for cleanup
   const gameListener = (evt) => {
     // Allow updates for both live and prematch modes
     if (currentMode !== 'live' && currentMode !== 'prematch') return;
@@ -105,7 +106,14 @@ function startLiveGameStream(gameId) {
     }
   };
 
-  const onerrorHandler = () => {
+  // Add listeners and track them for cleanup
+  es.addEventListener('game', gameListener);
+  liveGameStreamListeners.push({ type: 'game', listener: gameListener });
+
+  es.addEventListener('error', errorListener);
+  liveGameStreamListeners.push({ type: 'error', listener: errorListener });
+
+  es.onerror = () => {
     // Stop if not in live or prematch mode
     if (currentMode !== 'live' && currentMode !== 'prematch') {
       stopLiveGameStream();
@@ -127,14 +135,4 @@ function startLiveGameStream(gameId) {
       if (currentMode === 'live' || currentMode === 'prematch') startLiveGameStream(gid);
     }, 5000);
   };
-
-  // Add listeners and track them for cleanup
-  es.addEventListener('game', gameListener);
-  liveGameStreamListeners.push({ type: 'game', listener: gameListener });
-
-  es.addEventListener('error', errorListener);
-  liveGameStreamListeners.push({ type: 'error', listener: errorListener });
-
-  // Note: onerror is a property, not an event listener, so it doesn't need tracking
-  es.onerror = onerrorHandler;
 }
