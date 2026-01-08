@@ -99,6 +99,9 @@ const encoder = new TextEncoder();
  const ODDS_REFRESH_AFTER_MS = 60000;
  const GROUP_GRACE_MS = 30000;
  
+ // WebSocket connection timeout - 30 seconds as per Requirements 3.1
+ const WS_CONNECTION_TIMEOUT_MS = 30000;
+ 
  // Cache limits to prevent memory exhaustion
  const ODDS_CACHE_TTL_MS = 3600000; // 1 hour TTL
  const ODDS_CACHE_MAX_SIZE = 1000; // Max entries per cache
@@ -367,7 +370,10 @@ export class SwarmHubDO {
         this.rejectAllPending(new Error('Swarm WebSocket closed'));
       });
 
-      ws.addEventListener('error', () => {
+      ws.addEventListener('error', (event) => {
+        console.error('Swarm WebSocket error:', event);
+        
+        // Ensure cleanup on all error paths
         this.sessionId = null;
         this.ws = null;
         this.connecting = null;
@@ -376,15 +382,48 @@ export class SwarmHubDO {
 
       await new Promise<void>((resolve, reject) => {
         const timeoutId = setTimeout(() => {
-          reject(new Error('Swarm WebSocket connect timeout'));
-        }, 15000) as unknown as number;
+          // Cleanup WebSocket on timeout to prevent resource leaks
+          try {
+            if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
+          } catch (error) {
+            console.error('Failed to close WebSocket on timeout:', error);
+          }
+          
+          // Reset connection state
+          this.ws = null;
+          this.sessionId = null;
+          this.connecting = null;
+          
+          reject(new Error('Swarm WebSocket connect timeout (30s)'));
+        }, WS_CONNECTION_TIMEOUT_MS) as unknown as number; // 30 seconds as per Requirements 3.1
 
         ws.addEventListener('open', () => {
-          clearTimeout(timeoutId);
+          try {
+            clearTimeout(timeoutId);
+          } catch (error) {
+            console.error('Failed to clear connection timeout:', error);
+          }
           resolve();
         });
+        
         ws.addEventListener('error', () => {
-          clearTimeout(timeoutId);
+          try {
+            clearTimeout(timeoutId);
+          } catch (error) {
+            console.error('Failed to clear connection timeout on error:', error);
+          }
+          
+          // Ensure cleanup on error
+          try {
+            if (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN) {
+              ws.close();
+            }
+          } catch (error) {
+            console.error('Failed to close WebSocket on error:', error);
+          }
+          
           reject(new Error('Swarm WebSocket error on connect'));
         });
       });

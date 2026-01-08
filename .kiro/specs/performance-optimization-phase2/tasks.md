@@ -47,7 +47,7 @@ This implementation plan addresses the remaining high-priority performance issue
   - _Requirements: 2.4, 2.5_
 
 - [ ] 3. Implement WebSocket connection timeouts
-- [ ] 3.1 Add connection timeout to SwarmHubDO WebSocket creation
+- [x] 3.1 Add connection timeout to SwarmHubDO WebSocket creation
   - Implement 30-second timeout for WebSocket connection attempts
   - Add proper cleanup on timeout
   - _Requirements: 3.1, 3.4_
