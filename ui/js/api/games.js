@@ -17,12 +17,19 @@ async function loadGames(sportId, sportName) {
   }
   selectedGame = null;
 
-  showLoading(`Subscribing to ${sportName}...`);
-  currentSport = { id: sportId, name: sportName };
-
+  // CRITICAL FIX: Stop all existing streams before starting new ones
+  if (typeof stopLiveStream === 'function') {
+    stopLiveStream();
+  }
+  if (typeof stopPrematchStream === 'function') {
+    stopPrematchStream();
+  }
   if (typeof stopAllCompetitionOddsStreams === 'function') {
     stopAllCompetitionOddsStreams();
   }
+
+  showLoading(`Subscribing to ${sportName}...`);
+  currentSport = { id: sportId, name: sportName };
 
   try {
     // Show the content shell immediately; actual games come from SSE.

@@ -159,6 +159,24 @@ async function ensureResultsSportsLoaded(forceRefresh = false) {
 }
 
 async function loadResultGames(sportId, sportName) {
+  // CRITICAL FIX: Stop all streams when switching to results mode
+  if (typeof stopLiveStream === 'function') {
+    stopLiveStream();
+  }
+  if (typeof stopPrematchStream === 'function') {
+    stopPrematchStream();
+  }
+  if (typeof stopLiveGameStream === 'function') {
+    stopLiveGameStream();
+  }
+  if (typeof stopAllCompetitionOddsStreams === 'function') {
+    stopAllCompetitionOddsStreams();
+  }
+  if (typeof clearGameDetails === 'function') {
+    clearGameDetails();
+  }
+  selectedGame = null;
+
   showLoading(`Loading ${sportName} results...`);
   currentSport = { id: sportId, name: sportName };
 
