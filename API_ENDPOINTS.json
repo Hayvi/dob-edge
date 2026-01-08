@@ -1,0 +1,437 @@
+{
+  "api_endpoints": {
+    "base_url": "/api",
+    "cors_policy": {
+      "allowed_origins": ["*.pages.dev", "*"],
+      "allowed_methods": ["GET", "POST", "OPTIONS"],
+      "allowed_headers": ["Content-Type"]
+    },
+    "endpoints": [
+      {
+        "path": "/api/counts-stream",
+        "method": "GET",
+        "handler": "SwarmHubDO",
+        "type": "SSE",
+        "purpose": "Stream of game counts per sport",
+        "parameters": [],
+        "events": [
+          {
+            "name": "live_counts",
+            "description": "Live game counts by sport",
+            "payload_schema": {
+              "sports": [
+                {
+                  "name": "string",
+                  "count": "number"
+                }
+              ],
+              "total_games": "number"
+            }
+          },
+          {
+            "name": "prematch_counts",
+            "description": "Prematch game counts by sport",
+            "payload_schema": {
+              "sports": [
+                {
+                  "name": "string",
+                  "count": "number"
+                }
+              ],
+              "total_games": "number"
+            }
+          }
+        ]
+      },
+      {
+        "path": "/api/live-stream",
+        "method": "GET",
+        "handler": "SwarmHubDO",
+        "type": "SSE",
+        "purpose": "Stream of live games and odds for selected sport",
+        "parameters": [
+          {
+            "name": "sportId",
+            "type": "string",
+            "required": true,
+            "description": "Sport identifier"
+          }
+        ],
+        "events": [
+          {
+            "name": "games",
+            "description": "Updated game list with scores and status",
+            "payload_schema": {
+              "games": "array",
+              "sport": "string",
+              "updated_at": "string"
+            }
+          },
+          {
+            "name": "odds",
+            "description": "Main market odds updates",
+            "payload_schema": {
+              "odds": "object",
+              "chunk": "number",
+              "total_chunks": "number"
+            }
+          },
+          {
+            "name": "counts",
+            "description": "Live/prematch counts",
+            "payload_schema": {
+              "live_counts": "object",
+              "prematch_counts": "object"
+            }
+          }
+        ]
+      },
+      {
+        "path": "/api/prematch-stream",
+        "method": "GET",
+        "handler": "SwarmHubDO",
+        "type": "SSE",
+        "purpose": "Stream of prematch games and odds for selected sport",
+        "parameters": [
+          {
+            "name": "sportId",
+            "type": "string",
+            "required": true,
+            "description": "Sport identifier"
+          },
+          {
+            "name": "sportName",
+            "type": "string",
+            "required": false,
+            "description": "Sport name for display"
+          }
+        ],
+        "events": [
+          {
+            "name": "games",
+            "description": "Updated prematch game list",
+            "payload_schema": {
+              "games": "array",
+              "sport": "string",
+              "updated_at": "string"
+            }
+          },
+          {
+            "name": "odds",
+            "description": "Prematch odds updates",
+            "payload_schema": {
+              "odds": "object",
+              "chunk": "number",
+              "total_chunks": "number"
+            }
+          }
+        ]
+      },
+      {
+        "path": "/api/live-game-stream",
+        "method": "GET",
+        "handler": "LiveTrackerDO",
+        "type": "SSE",
+        "purpose": "Stream of real-time updates for selected game",
+        "parameters": [
+          {
+            "name": "gameId",
+            "type": "string",
+            "required": true,
+            "description": "Game identifier"
+          }
+        ],
+        "events": [
+          {
+            "name": "game",
+            "description": "Updated game data with scores, stats, markets",
+            "payload_schema": {
+              "gameId": "string",
+              "data": {
+                "type": "string",
+                "start_ts": "number",
+                "info": "object",
+                "text_info": "string",
+                "market": "object"
+              }
+            }
+          },
+          {
+            "name": "error",
+            "description": "Error messages",
+            "payload_schema": {
+              "error": "string",
+              "gameId": "string"
+            }
+          }
+        ]
+      },
+      {
+        "path": "/api/competition-odds-stream",
+        "method": "GET",
+        "handler": "SwarmHubDO",
+        "type": "SSE",
+        "purpose": "Stream of competition-specific odds",
+        "parameters": [
+          {
+            "name": "sportId",
+            "type": "string",
+            "required": true,
+            "description": "Sport identifier"
+          },
+          {
+            "name": "competitionId",
+            "type": "string",
+            "required": true,
+            "description": "Competition identifier"
+          },
+          {
+            "name": "mode",
+            "type": "string",
+            "required": true,
+            "enum": ["live", "prematch"],
+            "description": "Game mode"
+          }
+        ],
+        "events": [
+          {
+            "name": "odds",
+            "description": "Competition odds updates",
+            "payload_schema": {
+              "odds": "object",
+              "competition_id": "string",
+              "sport_id": "string"
+            }
+          }
+        ]
+      },
+      {
+        "path": "/api/live-tracker",
+        "method": "GET",
+        "handler": "LiveTrackerDO",
+        "type": "JSON",
+        "purpose": "Live game tracking endpoint",
+        "parameters": [
+          {
+            "name": "gameId",
+            "type": "string",
+            "required": true,
+            "description": "Game identifier"
+          }
+        ],
+        "response_schema": {
+          "status": "string",
+          "gameId": "string",
+          "data": "object"
+        }
+      },
+      {
+        "path": "/api/health",
+        "method": "GET",
+        "handler": "HealthMetricsDO",
+        "type": "JSON",
+        "purpose": "System health metrics",
+        "parameters": [],
+        "response_schema": {
+          "status": "string",
+          "live_tracker": {
+            "active_games": "number",
+            "active_sse_clients": "number",
+            "upstream_ws_connected_games": "number",
+            "ws_messages_total": "number",
+            "ws_messages_last_60s": "number",
+            "ws_parse_errors_total": "number",
+            "last_message_at": "string"
+          },
+          "swarm_ws": {
+            "connected": "boolean",
+            "active_subscriptions": "number",
+            "updates_last_60s_total": "number",
+            "by_endpoint": "object",
+            "by_tag": "object"
+          }
+        }
+      },
+      {
+        "path": "/api/hierarchy",
+        "method": "GET",
+        "handler": "SwarmHubDO",
+        "type": "JSON",
+        "purpose": "Sport/region/competition taxonomy",
+        "parameters": [],
+        "response_schema": {
+          "sports": [
+            {
+              "id": "string",
+              "name": "string",
+              "order": "number",
+              "regions": [
+                {
+                  "id": "string",
+                  "name": "string",
+                  "competitions": [
+                    {
+                      "id": "string",
+                      "name": "string"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "path": "/api/results/*",
+        "method": "GET",
+        "handler": "SwarmHubDO",
+        "type": "JSON",
+        "purpose": "Historical results",
+        "parameters": [
+          {
+            "name": "path",
+            "type": "string",
+            "required": true,
+            "description": "Results path (sport/date/etc)"
+          }
+        ],
+        "response_schema": {
+          "results": "array",
+          "metadata": "object"
+        }
+      },
+      {
+        "path": "/api/game-stats",
+        "method": "GET",
+        "handler": "index.ts",
+        "type": "JSON",
+        "purpose": "Game statistics (not implemented)",
+        "parameters": [],
+        "response_schema": {
+          "error": "string"
+        }
+      },
+      {
+        "path": "/api/fetch-all-sports",
+        "method": "GET",
+        "handler": "index.ts",
+        "type": "JSON",
+        "purpose": "Fetch all sports (not implemented)",
+        "parameters": [],
+        "response_schema": {
+          "count": "number",
+          "errors": "array"
+        }
+      }
+    ]
+  },
+  "durable_objects": {
+    "SwarmHubDO": {
+      "purpose": "Central hub managing WebSocket connections to Swarm API",
+      "responsibilities": [
+        "Maintains persistent WebSocket connection to Swarm API",
+        "Manages subscriptions to Swarm data feeds",
+        "Broadcasts data to multiple SSE clients",
+        "Handles odds caching and chunking",
+        "Manages client lifecycle and cleanup"
+      ],
+      "internal_state": {
+        "ws": "WebSocket connection to Swarm",
+        "sessionId": "Swarm session identifier",
+        "subscriptions": "Map of active Swarm subscriptions",
+        "countsClients": "Map of connected counts-stream clients",
+        "liveGroups": "Map of live sport stream groups",
+        "prematchGroups": "Map of prematch sport stream groups",
+        "liveGameGroups": "Map of live game stream groups",
+        "competitionOddsGroups": "Map of competition odds groups"
+      },
+      "key_methods": [
+        "ensureConnection()",
+        "subscribeGet()",
+        "handleCountsStream()",
+        "handleLiveSportGamesEmit()",
+        "handleCompetitionOddsEmit()",
+        "broadcast()"
+      ]
+    },
+    "LiveTrackerDO": {
+      "purpose": "Manages real-time game tracking from Animation ML",
+      "responsibilities": [
+        "Maintains WebSocket connection to Animation ML",
+        "Broadcasts live game events to SSE clients",
+        "Reports metrics to HealthMetricsDO",
+        "Handles per-game tracking sessions"
+      ],
+      "internal_state": {
+        "clients": "Map of connected SSE clients",
+        "upstream": "WebSocket to Animation ML",
+        "upstreamConnected": "Connection status",
+        "pendingMessagesDelta": "Message count since last report",
+        "pendingParseErrorsDelta": "Parse error count since last report"
+      },
+      "key_methods": [
+        "ensureUpstream()",
+        "broadcast()",
+        "report()",
+        "fetch()"
+      ]
+    },
+    "HealthMetricsDO": {
+      "purpose": "Aggregates system health metrics",
+      "responsibilities": [
+        "Tracks WebSocket message counts and parse errors",
+        "Maintains leases for active games with TTL",
+        "Builds rollup statistics for health endpoint",
+        "Persists metrics to Durable Object storage"
+      ],
+      "internal_state": {
+        "totals": "Cumulative message/error counts",
+        "buckets": "60-second sliding window of message counts",
+        "leases": "Active game tracking with expiration"
+      },
+      "key_methods": [
+        "handleReport()",
+        "buildRollups()",
+        "pruneLeases()",
+        "flush()"
+      ]
+    }
+  },
+  "external_services": {
+    "swarm_api": {
+      "type": "WebSocket",
+      "url": "wss://eu-swarm-newm.vmemkhhgjigrjefb.com",
+      "authentication": {
+        "partner_id": "1777"
+      },
+      "data_types": [
+        "Sports hierarchy",
+        "Games (live/prematch)",
+        "Markets and odds",
+        "Game counts",
+        "Results"
+      ],
+      "subscription_types": [
+        "live_games_with_odds",
+        "prematch_games_with_odds",
+        "counts",
+        "competition_odds",
+        "results"
+      ]
+    },
+    "animation_ml": {
+      "type": "WebSocket",
+      "url": "wss://animation.ml.bcua.io/animation_json_v2",
+      "authentication": {
+        "partner_id": "1777",
+        "site_ref": "https://sportsbook.forzza1x2.com/"
+      },
+      "data_types": [
+        "Real-time game events",
+        "Live scores",
+        "Game statistics",
+        "Match status updates"
+      ]
+    }
+  }
+}

@@ -1,0 +1,400 @@
+{
+  "project_map": {
+    "project_name": "dob-edge",
+    "description": "Real-time sports betting data aggregation platform",
+    "architecture": "Monorepo with frontend (Cloudflare Pages) and backend (Cloudflare Workers)",
+    "technology_stack": {
+      "frontend": ["Vanilla JavaScript", "HTML5", "CSS3"],
+      "backend": ["TypeScript", "Cloudflare Workers", "Durable Objects"],
+      "hosting": ["Cloudflare Pages", "Cloudflare Workers"],
+      "real_time": ["Server-Sent Events (SSE)", "WebSocket"]
+    },
+    "directory_structure": {
+      "/": {
+        "type": "root",
+        "description": "Project root with configuration and data files",
+        "files": [
+          "README.md",
+          ".gitignore",
+          "*.jsonl (data capture files)"
+        ]
+      },
+      "/ui/": {
+        "type": "frontend",
+        "description": "Static frontend application",
+        "entry_point": "index.html",
+        "subdirectories": {
+          "/ui/css/": {
+            "description": "Stylesheets organized by component",
+            "files": [
+              "01-base.css",
+              "02-header-buttons.css",
+              "03-sidebar.css",
+              "04-content-games.css",
+              "05-details-markets.css",
+              "06-modal-loading-toast.css"
+            ]
+          },
+          "/ui/js/": {
+            "description": "JavaScript modules",
+            "entry_point": "events.js",
+            "subdirectories": {
+              "/ui/js/api/": {
+                "description": "API communication modules",
+                "files": [
+                  "state.js",
+                  "countsStream.js",
+                  "liveStream.js",
+                  "prematchStream.js",
+                  "liveGameStream.js"
+                ]
+              },
+              "/ui/js/details/": {
+                "description": "Game details panel modules",
+                "files": [
+                  "state.js",
+                  "bindings.js",
+                  "liveTracker.js",
+                  "markets.js",
+                  "stats.js",
+                  "uiState.js"
+                ]
+              },
+              "/ui/js/renderGames/": {
+                "description": "Game rendering modules",
+                "files": [
+                  "gameRow.js",
+                  "grouping.js",
+                  "virtualization.js"
+                ]
+              },
+              "/ui/js/utils/": {
+                "description": "Utility modules",
+                "files": [
+                  "json.js",
+                  "oddsCache.js"
+                ]
+              }
+            },
+            "core_modules": [
+              "state.js",
+              "dom.js",
+              "ui.js",
+              "mobile.js",
+              "markets.js",
+              "renderGames.js",
+              "renderSports.js",
+              "details.js",
+              "health.js",
+              "events.js"
+            ]
+          }
+        }
+      },
+      "/workers/": {
+        "type": "backend",
+        "description": "Cloudflare Workers backend",
+        "entry_point": "src/index.ts",
+        "configuration": [
+          "package.json",
+          "wrangler.toml",
+          "tsconfig.json"
+        ],
+        "subdirectories": {
+          "/workers/src/": {
+            "description": "TypeScript source code",
+            "files": [
+              "index.ts",
+              "env.ts"
+            ],
+            "subdirectories": {
+              "/workers/src/durable/": {
+                "description": "Durable Object implementations",
+                "files": [
+                  "SwarmHubDO.ts",
+                  "LiveTrackerDO.ts",
+                  "HealthMetricsDO.ts"
+                ]
+              },
+              "/workers/src/lib/": {
+                "description": "Library modules",
+                "files": [
+                  "parseGamesFromData.ts",
+                  "odds.ts",
+                  "fingerprints.ts",
+                  "swarmCounts.ts"
+                ]
+              }
+            }
+          },
+          "/workers/tools/": {
+            "description": "Development and deployment tools"
+          }
+        }
+      }
+    },
+    "module_dependencies": {
+      "frontend_initialization_order": [
+        "state.js",
+        "dom.js",
+        "mobile.js",
+        "ui.js",
+        "markets.js",
+        "mainMarketHydration.js",
+        "renderGames/*",
+        "utils/json.js",
+        "api/*",
+        "renderSports.js",
+        "renderGames.js",
+        "details/*",
+        "details.js",
+        "health.js",
+        "events.js"
+      ],
+      "frontend_dependencies": {
+        "state.js": {
+          "depends_on": [],
+          "used_by": ["All modules"],
+          "exports": [
+            "hierarchy",
+            "currentSport",
+            "currentGames",
+            "selectedGame",
+            "currentMode",
+            "sportsCountsLive",
+            "sportsCountsPrematch"
+          ]
+        },
+        "api/countsStream.js": {
+          "depends_on": ["state.js", "dom.js"],
+          "used_by": ["events.js"],
+          "exports": [
+            "startCountsStream()",
+            "stopCountsStream()",
+            "isCountsStreamActive()"
+          ]
+        },
+        "api/liveStream.js": {
+          "depends_on": ["state.js", "markets.js", "renderGames.js"],
+          "used_by": ["events.js", "renderSports.js"],
+          "exports": [
+            "startLiveStream()",
+            "stopLiveStream()",
+            "isLiveStreamActive()"
+          ]
+        },
+        "renderGames.js": {
+          "depends_on": ["state.js", "markets.js", "dom.js"],
+          "used_by": ["api streams"],
+          "exports": [
+            "renderGames()",
+            "updateGameRowOdds()"
+          ]
+        },
+        "markets.js": {
+          "depends_on": ["utils/json.js"],
+          "used_by": ["renderGames.js", "details/markets.js"],
+          "exports": [
+            "pickMainMarketFromMap()",
+            "extract1X2Odds()",
+            "getMarketsCount()"
+          ]
+        }
+      },
+      "backend_dependencies": {
+        "index.ts": {
+          "depends_on": ["durable/*", "env.ts"],
+          "exports": ["default fetch handler"]
+        },
+        "SwarmHubDO.ts": {
+          "depends_on": [
+            "lib/fingerprints.ts",
+            "lib/odds.ts",
+            "lib/parseGamesFromData.ts",
+            "lib/swarmCounts.ts"
+          ],
+          "exports": ["SwarmHubDO class"]
+        },
+        "LiveTrackerDO.ts": {
+          "depends_on": ["env.ts"],
+          "exports": ["LiveTrackerDO class"]
+        },
+        "HealthMetricsDO.ts": {
+          "depends_on": ["env.ts"],
+          "exports": ["HealthMetricsDO class"]
+        }
+      }
+    },
+    "data_flow": {
+      "primary_flows": [
+        {
+          "name": "User Selects Sport (Live Mode)",
+          "steps": [
+            "User clicks sport",
+            "setMode('live') → startLiveStream(sportId)",
+            "Frontend: new EventSource('/api/live-stream?sportId=123')",
+            "Worker: Routes to SwarmHubDO.fetch()",
+            "SwarmHubDO: Creates/reuses liveGroups[sportId]",
+            "SwarmHubDO: Subscribes to Swarm API for sport games",
+            "Swarm API: Sends game updates via WebSocket",
+            "SwarmHubDO: Receives updates, fingerprints, broadcasts to all clients",
+            "Frontend: Receives 'games' event, updates currentGames",
+            "renderGames() → Groups by region/competition → Renders tree"
+          ]
+        },
+        {
+          "name": "Real-time Odds Updates",
+          "steps": [
+            "SwarmHubDO receives odds from Swarm",
+            "Chunks odds into 30-game batches",
+            "Generates fingerprint to detect changes",
+            "Broadcasts 'odds' event to all sport clients",
+            "Frontend receives odds, updates game.__mainOdds",
+            "updateGameRowOdds() highlights changed odds"
+          ]
+        },
+        {
+          "name": "Game Details Selection",
+          "steps": [
+            "User clicks game",
+            "selectedGame = game",
+            "startLiveGameStream(gameId)",
+            "Frontend: new EventSource('/api/live-game-stream?gameId=456')",
+            "Worker: Routes to LiveTrackerDO.fetch()",
+            "LiveTrackerDO: Creates upstream connection to Animation ML",
+            "Animation ML: Sends game events (scores, stats, markets)",
+            "LiveTrackerDO: Broadcasts to all clients via SSE",
+            "Frontend: Updates selectedGame, renders details panel"
+          ]
+        },
+        {
+          "name": "Counts Stream (Always Active)",
+          "steps": [
+            "Page loads",
+            "startCountsStream()",
+            "Frontend: new EventSource('/api/counts-stream')",
+            "SwarmHubDO: Creates countsClients entry",
+            "SwarmHubDO: Subscribes to Swarm for live/prematch counts",
+            "Swarm API: Sends count updates",
+            "SwarmHubDO: Broadcasts 'live_counts' and 'prematch_counts' events",
+            "Frontend: Updates sportsCountsLive, sportsCountsPrematch",
+            "renderSportsList() → Shows sports with game counts"
+          ]
+        }
+      ]
+    },
+    "key_functions": {
+      "frontend": {
+        "state_management": [
+          "setMode(mode)",
+          "loadHierarchy(force)",
+          "loadGames(sportName, sportId)",
+          "selectGame(game)"
+        ],
+        "streaming": [
+          "startCountsStream()",
+          "startLiveStream(sportId)",
+          "startPrematchStream(sportId, sportName)",
+          "startLiveGameStream(gameId)"
+        ],
+        "rendering": [
+          "renderSportsList()",
+          "renderGames(sportName, games, lastUpdated)",
+          "updateGameRowOdds(gameId, odds)",
+          "showGameDetails(game)"
+        ],
+        "market_processing": [
+          "pickMainMarketFromMap(marketsMap)",
+          "extract1X2Odds(mainMarket, team1, team2)",
+          "getMarketsCount(game)"
+        ]
+      },
+      "backend": {
+        "swarm_hub": [
+          "ensureConnection()",
+          "subscribeGet(endpoint, params)",
+          "handleCountsStream(request)",
+          "handleLiveSportGamesEmit(group, data)",
+          "broadcast(clients, event, data)"
+        ],
+        "live_tracker": [
+          "ensureUpstream(gameId)",
+          "broadcast(event, data)",
+          "report(opts)",
+          "fetch(request)"
+        ],
+        "health_metrics": [
+          "handleReport(payload)",
+          "buildRollups()",
+          "pruneLeases()",
+          "flush()"
+        ],
+        "data_processing": [
+          "parseGamesFromData(rawData, sportName, sportId)",
+          "getGameFp(data)",
+          "getSportMainMarketTypePriority(sportName)",
+          "buildOddsArrFromMarket(market)"
+        ]
+      }
+    },
+    "configuration": {
+      "environment_variables": {
+        "SWARM_WS_URL": "wss://eu-swarm-newm.vmemkhhgjigrjefb.com",
+        "SWARM_PARTNER_ID": "1777",
+        "LIVE_TRACKER_WS_URL": "wss://animation.ml.bcua.io/animation_json_v2",
+        "LIVE_TRACKER_PARTNER_ID": "1777",
+        "LIVE_TRACKER_SITE_REF": "https://sportsbook.forzza1x2.com/"
+      },
+      "durable_object_bindings": [
+        "SWARM_HUB → SwarmHubDO",
+        "LIVE_TRACKER → LiveTrackerDO",
+        "HEALTH_METRICS → HealthMetricsDO"
+      ]
+    },
+    "deployment": {
+      "frontend": {
+        "platform": "Cloudflare Pages",
+        "root_directory": "/ui/",
+        "build_command": "none",
+        "build_output": "/"
+      },
+      "backend": {
+        "platform": "Cloudflare Workers",
+        "root_directory": "/workers/",
+        "entry_point": "src/index.ts",
+        "build_command": "wrangler deploy"
+      },
+      "routing": {
+        "pages_domain": "app.example.com",
+        "api_route": "app.example.com/api/* → Worker"
+      }
+    },
+    "external_integrations": {
+      "swarm_api": {
+        "type": "WebSocket",
+        "purpose": "Betting data (games, odds, counts)",
+        "connection_management": "SwarmHubDO"
+      },
+      "animation_ml": {
+        "type": "WebSocket",
+        "purpose": "Live game tracking (scores, stats)",
+        "connection_management": "LiveTrackerDO"
+      }
+    },
+    "performance_optimizations": [
+      "Fingerprinting for change detection",
+      "Odds chunking (30-game batches)",
+      "Subscription reuse across clients",
+      "Client cleanup and grace periods",
+      "Viewport-based virtualization",
+      "Polling fallback for SSE failures"
+    ],
+    "error_handling": [
+      "Automatic retry with exponential backoff",
+      "Safe JSON parsing with fallbacks",
+      "WebSocket reconnection logic",
+      "Client cleanup on write failures",
+      "Toast notifications for user feedback"
+    ]
+  }
+}
