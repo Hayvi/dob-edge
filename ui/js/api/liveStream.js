@@ -110,6 +110,17 @@ function startLiveStream(sportId) {
       return;
     }
 
+    // Update UI to show connection issues
+    const gamesCountEl = document.getElementById('gamesCount');
+    if (gamesCountEl && gamesCountEl.textContent === 'Connecting...') {
+      gamesCountEl.textContent = 'Connection lost, retrying...';
+    }
+
+    // Trigger warmup on connection failure
+    if (typeof handleConnectionFailure === 'function') {
+      handleConnectionFailure();
+    }
+
     const sid = liveStreamSportId;
     stopLiveStream(); // This will clear intervals via clearLiveStreamIntervals()
     liveStreamSportId = sid;
@@ -117,13 +128,13 @@ function startLiveStream(sportId) {
     const now = Date.now();
     if (now - liveStreamLastToastAt > 15000) {
       liveStreamLastToastAt = now;
-      showToast('Live stream disconnected. Falling back to polling...', 'info');
+      showToast('Live stream disconnected. Retrying in 2s...', 'info');
     }
 
     liveStreamRetryTimeoutId = setTimeout(() => {
       liveStreamRetryTimeoutId = null;
       if (currentMode === 'live') startLiveStream(sid);
-    }, 5000);
+    }, 2000); // Reduced from 5000ms to 2000ms
   };
 
   // Add listeners and track them for cleanup

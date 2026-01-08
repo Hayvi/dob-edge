@@ -36,7 +36,7 @@ async function loadGames(sportId, sportName) {
     welcomeScreen.classList.add('hidden');
     gamesContainer.classList.remove('hidden');
     document.getElementById('selectedSportName').textContent = sportName;
-    document.getElementById('gamesCount').textContent = 'Loading games...';
+    document.getElementById('gamesCount').textContent = 'Connecting...';
     document.getElementById('lastUpdated').textContent = '';
     const regionsTree = document.getElementById('regionsTree');
     if (regionsTree) {
@@ -44,7 +44,7 @@ async function loadGames(sportId, sportName) {
       if (typeof clearOddsAnimationTimeoutsInContainer === 'function') {
         clearOddsAnimationTimeoutsInContainer(regionsTree);
       }
-      regionsTree.innerHTML = '<div class="loading">Loading games...</div>';
+      regionsTree.innerHTML = '<div class="loading">🔄 Connecting to stream...</div>';
     }
 
     if (currentMode === 'live' && typeof startLiveStream === 'function') {

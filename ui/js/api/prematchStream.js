@@ -58,6 +58,11 @@ function startPrematchStream(sportId) {
     const payload = safeJsonParse(evt?.data);
     if (!payload) return;
     
+    // Reset warmup attempts on successful data
+    if (typeof resetWarmupAttempts === 'function') {
+      resetWarmupAttempts();
+    }
+    
     applyPrematchGamesPayload(payload);
   };
 
@@ -99,6 +104,17 @@ function startPrematchStream(sportId) {
       return;
     }
 
+    // Update UI to show connection issues
+    const gamesCountEl = document.getElementById('gamesCount');
+    if (gamesCountEl && gamesCountEl.textContent === 'Connecting...') {
+      gamesCountEl.textContent = 'Connection lost, retrying...';
+    }
+
+    // Trigger warmup on connection failure
+    if (typeof handleConnectionFailure === 'function') {
+      handleConnectionFailure();
+    }
+
     const sid = prematchStreamSportId;
     stopPrematchStream();
     prematchStreamSportId = sid;
@@ -106,13 +122,13 @@ function startPrematchStream(sportId) {
     const now = Date.now();
     if (now - prematchStreamLastToastAt > 15000) {
       prematchStreamLastToastAt = now;
-      showToast('Prematch stream disconnected. Retrying...', 'info');
+      showToast('Stream disconnected. Retrying in 2s...', 'info');
     }
 
     prematchStreamRetryTimeoutId = setTimeout(() => {
       prematchStreamRetryTimeoutId = null;
       if (currentMode === 'prematch') startPrematchStream(sid);
-    }, 5000);
+    }, 2000); // Reduced from 5000ms to 2000ms
   };
 }
 

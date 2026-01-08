@@ -88,6 +88,30 @@ export default {
       );
     }
 
+    if (url.pathname === '/api/warmup') {
+      // Initialize SwarmHub DO to establish upstream connections
+      const swarmId = env.SWARM_HUB.idFromName('global');
+      const swarmStub = env.SWARM_HUB.get(swarmId);
+      
+      // Trigger hierarchy load to warm up connections
+      const hierarchyResp = await swarmStub.fetch('https://internal/api/hierarchy');
+      const hierarchyOk = hierarchyResp.ok;
+      
+      // Initialize health metrics
+      const healthId = env.HEALTH_METRICS.idFromName('global');
+      const healthStub = env.HEALTH_METRICS.get(healthId);
+      await healthStub.fetch('https://internal/live-tracker-rollups');
+      
+      return withCors(
+        request,
+        json({
+          status: 'warmed',
+          hierarchy_loaded: hierarchyOk,
+          timestamp: Date.now()
+        })
+      );
+    }
+
     if (url.pathname === '/api/game-stats') {
       return withCors(request, json({ error: 'No stats available' }));
     }
