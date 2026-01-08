@@ -277,7 +277,11 @@ export class SwarmHubDO {
 
   private rejectAllPending(err: unknown): void {
     for (const [rid, entry] of this.pending.entries()) {
-      clearTimeout(entry.timeoutId);
+      try {
+        clearTimeout(entry.timeoutId);
+      } catch (error) {
+        console.error('Failed to clear pending request timeout:', error);
+      }
       entry.reject(err);
       this.pending.delete(rid);
     }
@@ -580,16 +584,39 @@ export class SwarmHubDO {
 
   private startCountsHeartbeat(): void {
     if (this.countsHeartbeatTimer != null) return;
-    this.countsHeartbeatTimer = setInterval(() => {
-      void this.broadcast(this.countsClients, encodeSseComment(`ping ${Date.now()}`));
-      if (this.countsClients.size === 0) this.stopCountsHeartbeat();
-    }, 15000) as unknown as number;
+    try {
+      this.countsHeartbeatTimer = setInterval(() => {
+        try {
+          void this.broadcast(this.countsClients, encodeSseComment(`ping ${Date.now()}`));
+          if (this.countsClients.size === 0) this.stopCountsHeartbeat();
+        } catch (error) {
+          // Log error but continue - heartbeat failures should not crash the timer
+          console.error('Error in counts heartbeat:', error);
+          // If broadcast fails consistently, stop heartbeat to prevent resource waste
+          if (this.countsClients.size === 0) {
+            this.stopCountsHeartbeat();
+          }
+        }
+      }, 15000) as unknown as number;
+    } catch (error) {
+      // If timer creation fails, ensure we don't leave a dangling reference
+      console.error('Failed to start counts heartbeat timer:', error);
+      this.countsHeartbeatTimer = null;
+      throw error;
+    }
   }
 
   private stopCountsHeartbeat(): void {
     if (this.countsHeartbeatTimer == null) return;
-    clearInterval(this.countsHeartbeatTimer);
-    this.countsHeartbeatTimer = null;
+    try {
+      clearInterval(this.countsHeartbeatTimer);
+    } catch (error) {
+      // Log error but continue cleanup - timer cleanup failures should not prevent other operations
+      console.error('Failed to clear counts heartbeat timer:', error);
+    } finally {
+      // Always reset timer reference to prevent memory leaks
+      this.countsHeartbeatTimer = null;
+    }
   }
 
   private handleCountsEmit(kind: 'live' | 'prematch', data: unknown): void {
@@ -1084,12 +1111,22 @@ export class SwarmHubDO {
 
   private stopSportGroup(group: SportStreamGroup): void {
     if (group.timer != null) {
-      clearInterval(group.timer);
-      group.timer = null;
+      try {
+        clearInterval(group.timer);
+      } catch (error) {
+        console.error('Failed to clear sport group timer:', error);
+      } finally {
+        group.timer = null;
+      }
     }
     if (group.oddsTimer != null) {
-      clearInterval(group.oddsTimer);
-      group.oddsTimer = null;
+      try {
+        clearInterval(group.oddsTimer);
+      } catch (error) {
+        console.error('Failed to clear sport group odds timer:', error);
+      } finally {
+        group.oddsTimer = null;
+      }
     }
   }
 
@@ -1970,8 +2007,13 @@ export class SwarmHubDO {
 
   private stopGameGroup(group: GameStreamGroup): void {
     if (group.timer == null) return;
-    clearInterval(group.timer);
-    group.timer = null;
+    try {
+      clearInterval(group.timer);
+    } catch (error) {
+      console.error('Failed to clear game group timer:', error);
+    } finally {
+      group.timer = null;
+    }
   }
 
   private async ensureLiveGameSubscription(group: GameStreamGroup): Promise<void> {

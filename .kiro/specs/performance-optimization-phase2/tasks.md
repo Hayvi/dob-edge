@@ -41,7 +41,7 @@ This implementation plan addresses the remaining high-priority performance issue
   - Ensure timeouts are cleaned up when elements are removed
   - _Requirements: 2.3_
 
-- [ ] 2.4 Fix heartbeat timer cleanup in SwarmHubDO and LiveTrackerDO
+- [x] 2.4 Fix heartbeat timer cleanup in SwarmHubDO and LiveTrackerDO
   - Ensure heartbeat timers are cleared on all error paths
   - Add try-catch blocks around timer cleanup operations
   - _Requirements: 2.4, 2.5_

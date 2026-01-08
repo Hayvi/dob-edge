@@ -145,23 +145,48 @@ export class LiveTrackerDO {
   private startHeartbeat(gameId: string): void {
     if (this.heartbeatTimer != null) return;
 
-    this.heartbeatTimer = setInterval(() => {
-      void this.broadcast(encodeSseComment(`ping ${Date.now()}`));
-      this.pruneDisconnectedClients();
-      if (this.clients.size === 0) {
-        this.stopHeartbeat();
-        this.closeUpstream();
-        void this.report({ gameId, force: true, sseClients: 0, upstreamConnected: false });
-      } else {
-        void this.report({ gameId });
-      }
-    }, 15000) as unknown as number;
+    try {
+      this.heartbeatTimer = setInterval(() => {
+        try {
+          void this.broadcast(encodeSseComment(`ping ${Date.now()}`));
+          this.pruneDisconnectedClients();
+          if (this.clients.size === 0) {
+            this.stopHeartbeat();
+            this.closeUpstream();
+            void this.report({ gameId, force: true, sseClients: 0, upstreamConnected: false });
+          } else {
+            void this.report({ gameId });
+          }
+        } catch (error) {
+          // Log error but continue - heartbeat failures should not crash the timer
+          console.error('Error in heartbeat:', error);
+          // If broadcast fails consistently, stop heartbeat to prevent resource waste
+          if (this.clients.size === 0) {
+            this.stopHeartbeat();
+            this.closeUpstream();
+            void this.report({ gameId, force: true, sseClients: 0, upstreamConnected: false });
+          }
+        }
+      }, 15000) as unknown as number;
+    } catch (error) {
+      // If timer creation fails, ensure we don't leave a dangling reference
+      console.error('Failed to start heartbeat timer:', error);
+      this.heartbeatTimer = null;
+      throw error;
+    }
   }
 
   private stopHeartbeat(): void {
     if (this.heartbeatTimer == null) return;
-    clearInterval(this.heartbeatTimer);
-    this.heartbeatTimer = null;
+    try {
+      clearInterval(this.heartbeatTimer);
+    } catch (error) {
+      // Log error but continue cleanup - timer cleanup failures should not prevent other operations
+      console.error('Failed to clear heartbeat timer:', error);
+    } finally {
+      // Always reset timer reference to prevent memory leaks
+      this.heartbeatTimer = null;
+    }
   }
 
   private closeUpstream(): void {
@@ -174,6 +199,9 @@ export class LiveTrackerDO {
     this.upstream = null;
     this.upstreamConnected = false;
     this.upstreamConnecting = null;
+    
+    // Ensure heartbeat is stopped when upstream closes - defensive cleanup
+    this.stopHeartbeat();
   }
 
   private async ensureUpstream(gameId: string): Promise<void> {
